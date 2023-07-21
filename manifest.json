@@ -4,7 +4,7 @@
   "description": "O dashboard de compras é atualizado mensamenlte, ainda estamos trabalhando para atualização simultânea dos dados com a criação dos cards",
   "icon": "https://cdn.glitch.global/60995146-e0cb-40b6-85cd-4ec493e5b778/2782689.png?v=1689912767694",
   "author": "DHSF",
-  "init_url": "https://raw.githubusercontent.com/diogohsferraz/edge/main/",
+  "init_url": "https://raw.githubusercontent.com/diogohsferraz/edge/main/Index.html",
   "screenshots": ["https://cdn.glitch.global/60995146-e0cb-40b6-85cd-4ec493e5b778/2782689.png?v=1689912767694"],
   "features": ["pipe-buttons"]
 }
