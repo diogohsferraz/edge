@@ -2,9 +2,9 @@
   "name": "Dashboard",
   "short_description": "Visualize o dashboard de compras no Google lookerstudio",
   "description": "O dashboard de compras é atualizado mensamenlte, ainda estamos trabalhando para atualização simultânea dos dados com a criação dos cards",
-  "icon": "https://github.com/diogohsferraz/edge/blob/main/2782689.png?raw=true",
+  "icon": "https://cdn.glitch.global/60995146-e0cb-40b6-85cd-4ec493e5b778/2782689.png?v=1689912767694",
   "author": "DHSF",
   "init_url": "./",
-  "screenshots": ["https://github.com/diogohsferraz/edge/blob/main/2782689.png?raw=true"],
+  "screenshots": ["https://cdn.glitch.global/60995146-e0cb-40b6-85cd-4ec493e5b778/2782689.png?v=1689912767694"],
   "features": ["pipe-buttons"]
 }
