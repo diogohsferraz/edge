@@ -2,10 +2,10 @@
   "name": "Dados",
   "short_description": "Dashboard",
   "description": "Dashboard de compras",
-  "icon": "https://github.com/diogohsferraz/edge/blob/main/2782689.png",
+  "icon": "https://github.com/diogohsferraz/edge/blob/main/2782689.png?raw=true",
   "author": "DHSF",
   "init_url": "./",
-  "screenshots": ["https://github.com/diogohsferraz/edge/blob/main/2782689.png"],
+  "screenshots": ["https://github.com/diogohsferraz/edge/blob/main/2782689.png?raw=true"],
   "features": [
   "pipe-buttons"
   ]
