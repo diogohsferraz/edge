@@ -1,7 +1,7 @@
 {
-  "name": "appear.in",
-  "short_description": "Add a persistent video chat link to your pipe in a single click.",
-  "description": "No need to create a new video link every time you want to chat with your team. All members in the pipe can access the persistent video chat using the same link at anytime.",
+  "name": "Dados",
+  "short_description": "Dashboard",
+  "description": "Dashboard de compras",
   "icon": "https://github.com/diogohsferraz/edge/blob/main/2782689.png",
   "author": "DHSF",
   "init_url": "./",
