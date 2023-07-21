@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+  </head>
+  <body>
+    <!-- Pipefy Apps Client.js -->
+    <script src="https://platform.staticpipefy.com/pipefy-app.js"></script>
+    <script>
+      PipefyApp.initCall({
+        // Add pipe buttons
+        'pipe-buttons': function(p, pipe) {
+          return [
+            {
+              icon: 'https://cdn.glitch.com/e826a6eb-413f-4073-8b60-51381636ea8d%2Ficon.svg?1504497203271',
+              text: 'appear.in',
+              url: 'https://appear.in/pipefy-pipe-' + pipe.id,
+              target: 'blank'
+            }
+          ];
+        }
+      });
+    </script>
+  </body>
+</html>
