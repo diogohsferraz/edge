@@ -2,10 +2,10 @@
   "name": "Dashboard",
   "short_description": "Visualize o dashboard de compras no Google lookerstudio",
   "description": "O dashboard de compras é atualizado mensamenlte, ainda estamos trabalhando para atualização simultânea dos dados com a criação dos cards",
-  "icon": "https://github.com/diogohsferraz/edge/blob/main/2782689.png?raw=true",
+  "icon": "https://raw.githubusercontent.com/diogohsferraz/edge/main/2782689.png",
   "author": "DHSF",
   "init_url": "./",
-  "screenshots": ["https://github.com/diogohsferraz/edge/blob/main/2782689.png?raw=true"],
+  "screenshots": ["https://raw.githubusercontent.com/diogohsferraz/edge/main/2782689.png"],
   "features": [
   "pipe-buttons"
   ]
