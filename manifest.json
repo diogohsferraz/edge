@@ -5,6 +5,7 @@
   "icon": "https://github.com/diogohsferraz/edge/blob/main/2782689.png",
   "author": "DHSF",
   "init_url": "./",
+  "screenshots": ["https://github.com/diogohsferraz/edge/blob/main/2782689.png"],
   "features": [
   "pipe-buttons"
   ]
