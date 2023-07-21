@@ -5,7 +5,7 @@
   "icon": "./2782689.png",
   "author": "DHSF",
   "init_url": "./",
-    "features": [
-    "pipe-buttons"
+  "features": [
+  "pipe-buttons"
   ]
 }
