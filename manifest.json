@@ -3,10 +3,9 @@
   "short_description": "Add a persistent video chat link to your pipe in a single click.",
   "description": "No need to create a new video link every time you want to chat with your team. All members in the pipe can access the persistent video chat using the same link at anytime.",
   "icon": "2782689.png",
-  "author": "Pipefy, Inc.",
+  "author": "DHSF",
   "init_url": "./",
-  "screenshots": ,
-  "features": [
+    "features": [
     "pipe-buttons"
   ]
 }
