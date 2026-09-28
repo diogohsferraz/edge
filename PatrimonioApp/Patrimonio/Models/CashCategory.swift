@@ -19,6 +19,7 @@ enum CashCategory: String, CaseIterable, Identifiable, Codable {
     case assinaturas
     case contas
     case viagem
+    case cartao
     case impostos
     case pets
     case outrosGastos
@@ -52,6 +53,7 @@ enum CashCategory: String, CaseIterable, Identifiable, Codable {
         case .assinaturas: return "Assinaturas"
         case .contas: return "Contas da casa"
         case .viagem: return "Viagem"
+        case .cartao: return "Fatura do cartão"
         case .impostos: return "Impostos e taxas"
         case .pets: return "Pets"
         case .outrosGastos: return "Outros gastos"
@@ -75,6 +77,7 @@ enum CashCategory: String, CaseIterable, Identifiable, Codable {
         case .assinaturas: return "play.rectangle.fill"
         case .contas: return "bolt.fill"
         case .viagem: return "airplane"
+        case .cartao: return "creditcard.fill"
         case .impostos: return "doc.text.fill"
         case .pets: return "pawprint.fill"
         case .outrosGastos: return "ellipsis.circle.fill"
@@ -98,6 +101,7 @@ enum CashCategory: String, CaseIterable, Identifiable, Codable {
         case .assinaturas: return "#AC8E68"
         case .contas: return "#30B0C7"
         case .viagem: return "#66D4CF"
+        case .cartao: return "#3A3A3C"
         case .impostos: return "#8E8E93"
         case .pets: return "#A2845E"
         case .outrosGastos: return "#636366"

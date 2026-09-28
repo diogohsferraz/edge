@@ -35,6 +35,8 @@ Faz o papel da sua planilha: todos os investimentos ativos aparecem numa lista a
 ### Orçamento
 Receitas e despesas por categoria, resumo mensal, gráfico dos gastos por categoria e comparativo dos últimos 6 meses.
 
+**Importar extrato (CSV)**, no menu **+** do Orçamento ou em Ajustes, testado com o extrato de conta corrente do **Banco do Brasil**. As linhas de saldo são ignoradas e as movimentações de investimento (BB Rende Fácil, poupança, Tesouro) vêm desmarcadas. A categoria é sugerida pela descrição, e o app lembra a categoria que você escolher para cada favorecido. Importar o mesmo extrato de novo não duplica os lançamentos.
+
 ### Ajustes
 - **Importar planilha (CSV)** do Excel ou Google Planilhas, em dois formatos:
   - *Saldos por mês* (colunas `01/2026; 02/2026; …`), que é o formato mais comum de planilha de patrimônio;

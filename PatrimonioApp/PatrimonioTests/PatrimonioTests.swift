@@ -194,3 +194,80 @@ final class CSVServiceTests: XCTestCase {
         XCTAssertEqual(total, 10_500 + 25_260, accuracy: 0.001)
     }
 }
+
+final class StatementImporterTests: XCTestCase {
+    /// Mesmo formato do extrato de conta corrente do Banco do Brasil (dados fictícios).
+    static let sample = """
+    "Data","Lançamento","Detalhes","N° documento","Valor","Tipo Lançamento"
+    "31/08/2026","Saldo Anterior","","","0,00",""
+    "01/09/2026","Recebimento de Proventos","12.345.678/0001-00 ORGAO EXEMPLO","100001","8.500,00","Entrada"
+    "01/09/2026","Pix - Enviado","01/09 11:47 Fulano de Tal","90101","-32,00","Saída"
+    "01/09/2026","BB Rende Fácil","Rende Facil","9903","-6.000,00","Saída"
+    "01/09/2026","Saldo do dia","","","0,00",""
+    "03/09/2026","Compra com Cartão","03/09 18:00 POSTO EXEMPLO","164803","-150,00","Saída"
+    "03/09/2026","BB Rende Fácil","Rende Facil","9903","1.650,00","Entrada"
+    "04/09/2026","Pagamento de Boleto","EDIFICIO RES JARDIM EXEMPLO","90401","-650,00","Saída"
+    "04/09/2026","Pix - Enviado","04/09 12:42 SMARTFIT ESCOLA DE GINAST","90403","-195,72","Saída"
+    "10/09/2026","Pix - Recebido","10/09 09:00 Ciclano Exemplo","91001","250,00","Entrada"
+    "15/09/2026","Tesouro Dir-Amortizacao","","","80,88","Entrada"
+    "17/09/2026","Transferido da poupança","","","500,00","Entrada"
+    "20/09/2026","Pagto cartão crédito","CARTAO EXEMPLO","","-1.234,56","Saída"
+    "22/09/2026","Pagamento de Impostos","DARF","","-99,90","Saída"
+    "30/09/2026","S A L D O","","","1.234,00",""
+    """
+
+    func testParsesBancoDoBrasilStatement() throws {
+        // O BB exporta em Latin-1: garante que a decodificação funciona.
+        let data = try XCTUnwrap(Self.sample.data(using: .isoLatin1))
+        let text = CSVService.decodeText(data)
+        XCTAssertTrue(StatementImporter.isStatement(header: CSVService.parseRows(text)[0]))
+
+        let parsed = try StatementImporter.parse(text)
+        XCTAssertEqual(parsed.skippedBalance, 3)
+        XCTAssertEqual(parsed.skippedInvestment, 4)
+        let included = parsed.rows.filter(\.include)
+        XCTAssertEqual(included.count, 8)
+
+        func category(_ title: String) -> CashCategory? { included.first { $0.title == title }?.category }
+        XCTAssertEqual(category("Recebimento de Proventos"), .salario)
+        XCTAssertEqual(category("Compra com Cartão"), .transporte)
+        XCTAssertEqual(category("Pagamento de Boleto"), .moradia)
+        XCTAssertEqual(category("Pagto cartão crédito"), .cartao)
+        XCTAssertEqual(category("Pagamento de Impostos"), .impostos)
+        XCTAssertEqual(category("Pix - Recebido"), .outrasReceitas)
+        XCTAssertEqual(included.first { $0.details.hasPrefix("SMARTFIT") }?.category, .saude)
+        XCTAssertEqual(included.first { $0.details == "Fulano de Tal" }?.category, .outrosGastos)
+        XCTAssertEqual(included.filter(\.isIncome).reduce(0) { $0 + $1.amount }, 8750, accuracy: 0.001)
+    }
+
+    func testRemembersChosenCategory() throws {
+        var rows = try StatementImporter.parse(Self.sample).rows
+        let i = try XCTUnwrap(rows.firstIndex { $0.details == "Fulano de Tal" })
+        rows[i].category = .moradia
+        let rules = StatementImporter.learn(from: rows, rules: [:])
+        let again = StatementImporter.prepare(try StatementImporter.parse(Self.sample).rows, rules: rules, existingRefs: [])
+        let row = try XCTUnwrap(again.first { $0.details == "Fulano de Tal" })
+        XCTAssertEqual(row.category, .moradia)
+        XCTAssertTrue(row.isRemembered)
+    }
+
+    @MainActor
+    func testImportDoesNotDuplicate() throws {
+        let container = try ModelContainer(
+            for: Institution.self, Asset.self, BalanceSnapshot.self, Movement.self, CashTransaction.self,
+            configurations: ModelConfiguration(UUID().uuidString, isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let rows = try StatementImporter.parse(Self.sample).rows
+        XCTAssertEqual(StatementImporter.importRows(rows, into: context).added, 8)
+        let second = StatementImporter.importRows(rows, into: context)
+        XCTAssertEqual(second.added, 0)
+        XCTAssertEqual(second.duplicates, 8)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CashTransaction>()).count, 8)
+
+        let refs = Set(try context.fetch(FetchDescriptor<CashTransaction>()).map(\.ref))
+        let prepared = StatementImporter.prepare(rows, rules: [:], existingRefs: refs)
+        XCTAssertEqual(prepared.filter(\.isDuplicate).count, 8)
+        XCTAssertFalse(prepared.contains(where: \.include))
+    }
+}

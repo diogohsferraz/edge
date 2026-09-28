@@ -98,13 +98,16 @@ final class CashTransaction {
     var isIncome: Bool = false
     var categoryRaw: String = CashCategory.outrosGastos.rawValue
     var note: String = ""
+    /// Identificador do lançamento no extrato bancário (evita importar duas vezes).
+    var ref: String = ""
 
-    init(date: Date, amount: Double, category: CashCategory, note: String = "") {
+    init(date: Date, amount: Double, category: CashCategory, note: String = "", ref: String = "") {
         self.date = date
         self.amount = amount
         self.isIncome = category.isIncome
         self.categoryRaw = category.rawValue
         self.note = note
+        self.ref = ref
     }
 
     var category: CashCategory {

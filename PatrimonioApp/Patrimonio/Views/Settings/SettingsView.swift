@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var showImporter = false
     @State private var importResult: String?
     @State private var shareFile: ShareFile?
+    @State private var statementFile: StatementFile?
     @State private var confirmWipe = false
     @State private var confirmSample = false
 
@@ -58,7 +59,7 @@ struct SettingsView: View {
                     Button {
                         showImporter = true
                     } label: {
-                        Label("Importar planilha (CSV)", systemImage: "square.and.arrow.down")
+                        Label("Importar planilha ou extrato (CSV)", systemImage: "square.and.arrow.down")
                     }
                     NavigationLink {
                         ImportHelpView()
@@ -151,6 +152,11 @@ struct SettingsView: View {
                 ActivityView(items: [file.url])
                     .presentationDetents([.medium, .large])
             }
+            .sheet(item: $statementFile) { file in
+                StatementImportView(text: file.text) { added, _ in
+                    importResult = "\(added) lançamento(s) importado(s) no Orçamento."
+                }
+            }
             .confirmationDialog("Apagar todos os dados?", isPresented: $confirmWipe, titleVisibility: .visible) {
                 Button("Apagar tudo", role: .destructive) {
                     PortfolioStore.deleteEverything(in: context)
@@ -190,6 +196,10 @@ struct SettingsView: View {
             do {
                 let data = try Data(contentsOf: url)
                 let text = CSVService.decodeText(data)
+                if let header = CSVService.parseRows(text).first, StatementImporter.isStatement(header: header) {
+                    statementFile = StatementFile(text: text)
+                    return
+                }
                 let summary = try CSVService.importCSV(text: text, into: context)
                 importResult = summary.description
             } catch {

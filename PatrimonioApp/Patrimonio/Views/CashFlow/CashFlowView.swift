@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import UniformTypeIdentifiers
 
 /// Controle de receitas e despesas do mês (estilo Mobills / Organizze).
 struct CashFlowView: View {
@@ -10,6 +11,9 @@ struct CashFlowView: View {
     @State private var month = Date().startOfMonth
     @State private var editing: CashTransaction?
     @State private var newIsIncome: Bool?
+    @State private var showStatementPicker = false
+    @State private var statementFile: StatementFile?
+    @State private var message: String?
 
     private var monthTransactions: [CashTransaction] {
         transactions.filter { $0.date.isSameMonth(as: month) }
@@ -83,12 +87,31 @@ struct CashFlowView: View {
                     Menu {
                         Button { newIsIncome = false } label: { Label("Nova despesa", systemImage: "minus.circle") }
                         Button { newIsIncome = true } label: { Label("Nova receita", systemImage: "plus.circle") }
+                        Divider()
+                        Button { showStatementPicker = true } label: { Label("Importar extrato (CSV)", systemImage: "doc.text.magnifyingglass") }
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
             }
             .sheet(item: $editing) { TransactionFormView(transaction: $0, isIncome: $0.isIncome) }
+            .fileImporter(isPresented: $showStatementPicker, allowedContentTypes: [.commaSeparatedText, .plainText, .text]) { result in
+                switch readPickedFile(result.map { [$0] }) {
+                case .success(let text): statementFile = StatementFile(text: text)
+                case .failure(let error): message = error.localizedDescription
+                }
+            }
+            .sheet(item: $statementFile) { file in
+                StatementImportView(text: file.text) { added, last in
+                    if let last { month = last.startOfMonth }
+                    message = "\(added) lançamento(s) importado(s)."
+                }
+            }
+            .alert("Extrato", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(message ?? "")
+            }
             .sheet(isPresented: Binding(get: { newIsIncome != nil }, set: { if !$0 { newIsIncome = nil } })) {
                 TransactionFormView(transaction: nil, isIncome: newIsIncome ?? false, defaultDate: month.isSameMonth(as: Date()) ? Date() : month)
             }
