@@ -271,7 +271,7 @@
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : 1))
       .forEach((t) => {
-        out.push([U.fmtDate(t.date), t.income ? 'Receita' : 'Despesa', P.categoryById(t.category).title, num(t.amount), t.note].map(esc).join(';'));
+        out.push([U.fmtDate(t.date), t.income ? 'Receita' : 'Despesa', P.categoryLabel(t.category), num(t.amount), t.note].map(esc).join(';'));
       });
     return out.join('\n');
   };

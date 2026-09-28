@@ -276,3 +276,42 @@ test('fatura: remove o pagamento lançado pelo extrato e não duplica ao reimpor
   assert.equal(again.added, 0);
   assert.ok(P.normalizeData(JSON.parse(JSON.stringify(store.data))).settings.cardItemized);
 });
+
+test('categorias e subcategorias personalizadas', () => {
+  const store = P.createStore(memoryBackend());
+  const filhos = store.saveCategory({ title: 'Filhos', income: false, color: '#123456' });
+  const escola = store.saveCategory({ title: 'Escola', parentId: filhos.id });
+  const condominio = store.saveCategory({ title: 'Condomínio', parentId: 'moradia' });
+  assert.equal(escola.income, false);
+  assert.equal(condominio.color, P.categoryById('moradia').color); // herda a cor da categoria principal
+  assert.equal(P.categoryLabel(condominio.id), 'Moradia › Condomínio');
+  assert.equal(P.rootCategory(escola.id).id, filhos.id);
+  assert.ok(P.inCategory(condominio.id, 'moradia'));
+  assert.ok(!P.inCategory('moradia', condominio.id));
+  assert.deepEqual([...P.subcategoriesOf('moradia')].map((c) => c.id), [condominio.id]);
+  const list = P.categoriesFor(false).map((c) => c.id);
+  assert.ok(list.indexOf(condominio.id) === list.indexOf('moradia') + 1); // subcategoria logo abaixo da mãe
+
+  // Validações
+  assert.throws(() => store.saveCategory({ title: 'Escola', parentId: filhos.id }), /Já existe/);
+  assert.throws(() => store.saveCategory({ title: 'X', parentId: escola.id }), /categoria principal/);
+  assert.throws(() => store.saveCategory({ title: ' ' }), /nome/);
+
+  // Lançamentos na subcategoria
+  store.saveTransaction({ date: '2026-09-10', amount: 800, category: condominio.id, note: 'Condomínio' });
+  store.saveTransaction({ date: '2026-09-12', amount: 300, category: escola.id, note: 'Material' });
+  assert.equal(store.data.transactions.find((t) => t.note === 'Material').income, false);
+  assert.equal(store.categoryUsage('moradia'), 1);
+
+  // Persistência (JSON) mantém categorias e vínculos
+  const round = P.normalizeData(JSON.parse(JSON.stringify(store.data)));
+  assert.equal(round.customCategories.length, 3);
+  assert.equal(round.transactions.find((t) => t.note === 'Material').category, escola.id);
+
+  // Excluir a principal leva as subcategorias e move os lançamentos
+  const moved = store.deleteCategory(filhos.id, 'educacao');
+  assert.equal(moved, 1);
+  assert.equal(store.data.transactions.find((t) => t.note === 'Material').category, 'educacao');
+  assert.ok(!P.categoryExists(escola.id));
+  assert.equal(store.data.customCategories.length, 1);
+});

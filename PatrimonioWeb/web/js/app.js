@@ -186,8 +186,17 @@
       const t = store.data.transactions.find((x) => x.id === id);
       openTransactionForm(t, t.income);
     },
+    'manage-categories': () => {
+      go('settings');
+      const el = document.getElementById('categories');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    'new-category': (type) => openCategoryForm(null, { income: type === 'income' }),
+    'new-subcategory': (parentId) => openCategoryForm(null, { income: P.categoryById(parentId).income, parentId }),
+    'edit-category': (id) => openCategoryForm(P.categoryById(id)),
+    'delete-category': (id) => confirmDeleteCategory(P.categoryById(id)),
     'cash-filter': (json) => setCashFilter(JSON.parse(json)),
-    'cash-cat': (id) => setCashFilter({ cashCategory: state.cashCategory === id ? null : id, cashDay: state.cashDay }),
+    'cash-cat': (id) => setCashFilter({ cashCategory: state.cashCategory === id ? P.categoryById(id).parentId || null : id, cashDay: state.cashDay }),
     'cash-day': (day) => setCashFilter({ cashDay: state.cashDay === day ? null : day }),
     'cash-prev': () => setCashFilter({ cashMonth: U.addMonths(state.cashMonth, -1), cashDay: null }),
     'cash-next': () => setCashFilter({ cashMonth: U.addMonths(state.cashMonth, 1), cashDay: null }),
@@ -725,7 +734,7 @@
     opts = opts || {};
     if (f.type === 'income' && !t.income) return false;
     if (f.type === 'expense' && t.income) return false;
-    if (f.category && !opts.ignoreCategory && t.category !== f.category) return false;
+    if (f.category && !opts.ignoreCategory && !P.inCategory(t.category, f.category)) return false;
     if (f.day && !opts.ignoreDay && t.date !== f.day) return false;
     return true;
   }
@@ -742,14 +751,19 @@
 
     // Rosca: categorias do tipo escolhido (despesas por padrão), respeitando o filtro de dia.
     const donutIncome = f.type === 'income' || (selCat && selCat.income);
+    // Com uma categoria que tem subcategorias selecionada, a rosca "abre" nas subcategorias dela.
+    const drillRoot = selCat ? P.rootCategory(selCat.id) : null;
+    const drill = drillRoot && P.subcategoriesOf(drillRoot.id).length > 0 ? drillRoot : null;
     const byCat = {};
     monthItems
-      .filter((t) => t.income === !!donutIncome && (!f.day || t.date === f.day))
+      .filter((t) => t.income === !!donutIncome && (!f.day || t.date === f.day) && (!drill || P.inCategory(t.category, drill.id)))
       .forEach((t) => {
-        const c = P.categoryById(t.category);
-        byCat[c.id] = byCat[c.id] || { key: c.id, label: c.title, color: c.color, value: 0, count: 0 };
-        byCat[c.id].value += t.amount;
-        byCat[c.id].count++;
+        const c = drill ? P.categoryById(t.category) : P.rootCategory(t.category);
+        const direct = drill && c.id === drill.id;
+        const key = c.id;
+        byCat[key] = byCat[key] || { key, label: direct ? drill.title + ' (sem subcategoria)' : c.title, color: c.color, value: 0, count: 0, subs: !drill && P.subcategoriesOf(c.id).length };
+        byCat[key].value += t.amount;
+        byCat[key].count++;
       });
     const cats = Object.values(byCat).sort((a, b) => b.value - a.value);
     const catTotal = cats.reduce((a, c) => a + c.value, 0);
@@ -798,7 +812,7 @@
       '<button class="chip active-filter" data-action="cash-filter" data-id="' + esc(JSON.stringify(patch)) + '">' + esc(label) + ' <span aria-hidden="true">×</span></button>';
     const chips = [];
     if (f.type !== 'all') chips.push(chip(f.type === 'income' ? 'Receitas' : 'Despesas', { cashType: 'all' }));
-    if (selCat) chips.push(chip(selCat.title, { cashCategory: null }));
+    if (selCat) chips.push(chip(P.categoryLabel(selCat.id), { cashCategory: selCat.parentId || null }));
     if (f.day) chips.push(chip('Dia ' + U.fmtShortDate(f.day), { cashDay: null }));
     const filterBar = chips.length
       ? '<div class="filter-bar"><span class="faint">Filtrando:</span>' + chips.join('') + '<button class="btn small ghost" data-action="cash-filter" data-id="' + esc(JSON.stringify({ cashType: 'all', cashCategory: null, cashDay: null })) + '">Limpar filtros</button></div>'
@@ -810,7 +824,7 @@
 
     view.innerHTML =
       '<div class="toolbar"><button class="btn small" data-action="cash-prev">‹</button><strong style="min-width:170px;text-align:center">' + U.fmtMonthLong(mk) + '</strong><button class="btn small" data-action="cash-next">›</button>' +
-      '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="import-invoice">Importar fatura (PDF)</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
+      '<span class="spacer"></span><button class="btn" data-action="manage-categories">Categorias</button><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="import-invoice">Importar fatura (PDF)</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
       filterBar +
       '<div class="grid">' +
       '<section class="card span-12"><div class="kpi-tiles">' +
@@ -818,21 +832,26 @@
       tile('Despesas', money(expense), 'neg', 'expense') +
       tile('Saldo do mês', money(balance), cls(balance), 'all', income > 0 ? '<div class="faint">Taxa de poupança ' + U.pct(balance / income) + '</div>' : '') +
       (selCat
-        ? '<div class="kpi-tile static"><div class="l">' + esc(selCat.title) + '</div><div class="v num">' + money(monthItems.filter((t) => t.category === selCat.id).reduce((a, t) => a + t.amount, 0)) + '</div><div class="faint">' +
-          U.pct(cats.find((c) => c.key === selCat.id) ? cats.find((c) => c.key === selCat.id).share : 0) + ' das ' + (selCat.income ? 'receitas' : 'despesas') + '</div></div>'
+        ? (() => {
+            const v = monthItems.filter((t) => P.inCategory(t.category, selCat.id)).reduce((a, t) => a + t.amount, 0);
+            const base = selCat.income ? income : expense;
+            return '<div class="kpi-tile static"><div class="l">' + esc(P.categoryLabel(selCat.id)) + '</div><div class="v num">' + money(v) + '</div><div class="faint">' + U.pct(base ? v / base : 0) + ' das ' + (selCat.income ? 'receitas' : 'despesas') + '</div></div>';
+          })()
         : '') +
       '</div>' +
       (income > 0 ? '<div class="progress" style="margin-top:14px"><span style="width:' + Math.min(100, (expense / income) * 100).toFixed(1) + '%;background:' + (expense > income ? 'var(--red)' : 'var(--orange)') + '"></span></div><div class="faint" style="margin-top:6px">Você gastou ' + U.pct(expense / income) + ' do que recebeu.</div>' : '') +
       '</section>' +
-      '<section class="card span-5"><div class="card-head"><h3 class="card-title">' + (donutIncome ? 'Receitas' : 'Gastos') + ' por categoria' + (f.day ? ' · ' + U.fmtShortDate(f.day) : '') + '</h3>' +
+      '<section class="card span-5"><div class="card-head"><div><h3 class="card-title">' +
+      (drill ? esc(drill.title) + ' por subcategoria' : (donutIncome ? 'Receitas' : 'Gastos') + ' por categoria') + (f.day ? ' · ' + U.fmtShortDate(f.day) : '') + '</h3>' +
+      (drill ? '<button class="linklike faint" data-action="cash-filter" data-id="' + esc(JSON.stringify({ cashCategory: null })) + '">‹ voltar para todas as categorias</button>' : '') + '</div>' +
       seg('cashType', [['all', 'Tudo'], ['expense', 'Despesas'], ['income', 'Receitas']], f.type) + '</div>' +
       (cats.length
         ? '<div class="chart-box donut" style="margin-top:6px"><canvas id="ch-cats"></canvas></div><div class="list" style="margin-top:10px">' +
           cats
             .map(
               (c) =>
-                '<div class="row clickable cat-row' + (selCat && selCat.id === c.key ? ' selected' : selCat ? ' dimmed' : '') + '" data-action="cash-cat" data-id="' + c.key + '">' +
-                '<i class="dot" style="background:' + c.color + '"></i><div class="grow"><div class="title">' + esc(c.label) + '</div><div class="sub">' + c.count + ' lançamento(s)</div></div>' +
+                '<div class="row clickable cat-row' + (selCat && selCat.id === c.key ? ' selected' : selCat && !(drill && selCat.id === drill.id) ? ' dimmed' : '') + '" data-action="cash-cat" data-id="' + c.key + '">' +
+                '<i class="dot" style="background:' + c.color + '"></i><div class="grow"><div class="title">' + esc(c.label) + (c.subs ? ' <span class="faint">›</span>' : '') + '</div><div class="sub">' + c.count + ' lançamento(s)' + (c.subs ? ' · ' + c.subs + ' subcategoria(s)' : '') + '</div></div>' +
                 '<div class="num">' + money(c.value) + '</div><div class="muted num" style="width:60px;text-align:right">' + U.pct(c.share) + '</div></div>'
             )
             .join('') +
@@ -854,7 +873,7 @@
                     return (
                       '<div class="row clickable" data-action="edit-tx" data-id="' + t.id + '">' + badge(c.title, c.color) +
                       '<div class="grow"><div class="title">' + esc(t.note || c.title) + '</div>' +
-                      '<button class="chip small-chip" data-action="cash-cat" data-id="' + c.id + '" title="Filtrar por ' + esc(c.title) + '"><i class="dot" style="background:' + c.color + '"></i>' + esc(c.title) + '</button></div>' +
+                      '<button class="chip small-chip" data-action="cash-cat" data-id="' + c.id + '" title="Filtrar por ' + esc(P.categoryLabel(c.id)) + '"><i class="dot" style="background:' + c.color + '"></i>' + esc(P.categoryLabel(c.id)) + '</button></div>' +
                       '<div class="num ' + (t.income ? 'pos' : '') + '" style="font-weight:600">' + (t.income ? '+' : '−') + money(t.amount) + '</div></div>'
                     );
                   })
@@ -867,8 +886,9 @@
 
     if (cats.length) {
       C.donut($('#ch-cats'), cats, hidden(), {
-        selected: selCat ? selCat.id : null,
-        onClick: (slice) => setCashFilter({ cashCategory: state.cashCategory === slice.key ? null : slice.key }),
+        selected: selCat && !(drill && selCat.id === drill.id) ? selCat.id : null,
+        onClick: (slice) =>
+          setCashFilter({ cashCategory: state.cashCategory === slice.key ? (drill && slice.key !== drill.id ? drill.id : null) : slice.key }),
       });
     }
     C.cashBars($('#ch-cash'), months, hidden(), {
@@ -926,6 +946,7 @@
       '<p>Última atualização: <strong>' + (bench.updated ? new Date(bench.updated).toLocaleString('pt-BR') : 'nunca') + '</strong></p>' +
       (state.benchError ? '<p class="neg" style="font-size:13px">' + esc(state.benchError) + '</p>' : '') +
       '<button class="btn" data-action="refresh-bench"' + (state.benchLoading ? ' disabled' : '') + '>' + (state.benchLoading ? 'Atualizando…' : 'Atualizar agora') + '</button></section>' +
+      categoriesCard() +
       '<section class="card span-12"><h3 class="card-title">Dados</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="sample">Carregar dados de exemplo</button><button class="btn danger" data-action="wipe">Apagar todos os dados</button></div></section>' +
       '</div>';
     if (store.backend.info) {
@@ -998,10 +1019,7 @@
 
   /** Tabela de prévia usada pelo extrato e pela fatura. */
   function previewTable(rows) {
-    const catOptions = (r) =>
-      P.CASH_CATEGORIES.filter((c) => c.income === r.income)
-        .map((c) => '<option value="' + c.id + '"' + (c.id === r.category ? ' selected' : '') + '>' + esc(c.title) + '</option>')
-        .join('');
+    const catOptions = (r) => categoryOptions(r.income, r.category, false);
     const tag = (t, title) => ' <span class="tag"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(t) + '</span>';
     return (
       '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th></th><th>Data</th><th>Descrição</th><th style="text-align:right">Valor</th><th>Categoria</th></tr></thead><tbody>' +
@@ -1467,10 +1485,154 @@
     });
   }
 
+  /** <option>s de categoria com subcategorias recuadas. `allowNew` adiciona "+ Nova categoria…". */
+  function categoryOptions(income, selected, allowNew) {
+    return (
+      P.categoriesFor(income)
+        .map((c) => '<option value="' + c.id + '"' + (c.id === selected ? ' selected' : '') + '>' + (c.depth ? '   ↳ ' : '') + esc(c.title) + '</option>')
+        .join('') + (allowNew ? '<option value="__new">+ Nova categoria…</option>' : '')
+    );
+  }
+
+  /** Liga a opção "+ Nova categoria…" de um <select> ao formulário de categoria. */
+  function bindNewCategory(select, getIncome) {
+    let previous = select.value;
+    select.addEventListener('focus', () => (previous = select.value));
+    select.addEventListener('change', () => {
+      if (select.value !== '__new') return (previous = select.value);
+      select.value = previous;
+      const parent = P.categoryById(previous);
+      openCategoryForm(null, { income: getIncome(), parentId: null, suggestParent: parent && !parent.parentId ? parent.id : null }, (saved) => {
+        select.innerHTML = categoryOptions(saved.income, saved.id, true);
+        previous = saved.id;
+      });
+    });
+  }
+
+  /** Criar/editar categoria ou subcategoria. `defaults`: { income, parentId, suggestParent } */
+  function openCategoryForm(cat, defaults, onSaved) {
+    defaults = defaults || {};
+    const isNew = !cat;
+    const income = cat ? cat.income : !!defaults.income;
+    const parentId = cat ? cat.parentId : defaults.parentId || null;
+    const hasSubs = cat && P.subcategoriesOf(cat.id).length > 0;
+    const parentOptions = (inc, sel) =>
+      '<option value="">Nenhuma — é uma categoria principal</option>' +
+      P.topCategories(inc)
+        .filter((c) => !cat || c.id !== cat.id)
+        .map((c) => '<option value="' + c.id + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.title) + '</option>')
+        .join('');
+    const color = cat ? cat.color : parentId ? P.categoryById(parentId).color : P.PALETTE[P.customCategories().length % P.PALETTE.length];
+    openModal({
+      title: isNew ? (parentId ? 'Nova subcategoria' : 'Nova categoria') : 'Editar categoria',
+      body:
+        '<div class="field"><label>Tipo</label><div class="seg" id="cat-type"><button type="button" data-inc="0" class="' + (!income ? 'on' : '') + '">Despesa</button><button type="button" data-inc="1" class="' + (income ? 'on' : '') + '">Receita</button></div></div>' +
+        '<div class="form-row" style="grid-template-columns:1fr 90px">' +
+        field('Nome', '<input type="text" name="title" required placeholder="Ex.: Condomínio, Academia, Filhos" value="' + esc(cat ? cat.title : '') + '">') +
+        field('Cor', '<input type="color" name="color" value="' + esc(color) + '" style="height:40px;width:100%;padding:2px">') +
+        '</div>' +
+        field(
+          'Dentro de (opcional)',
+          '<select name="parentId"' + (hasSubs ? ' disabled' : '') + '>' + parentOptions(income, parentId || (isNew ? '' : '')) + '</select>',
+          hasSubs ? 'Esta categoria tem subcategorias, por isso continua sendo principal.' : 'Escolha uma categoria para criar uma <strong>subcategoria</strong> (ex.: Moradia › Condomínio).'
+        ) +
+        (isNew && defaults.suggestParent && !parentId
+          ? '<p class="faint">Dica: para criar uma subcategoria de <strong>' + esc(P.categoryById(defaults.suggestParent).title) + '</strong>, escolha-a em "Dentro de".</p>'
+          : ''),
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Salvar',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            try {
+              const inc = $('#cat-type .on', form).dataset.inc === '1';
+              const saved = store.saveCategory({ id: cat ? cat.id : undefined, title: val(form, 'title'), income: inc, color: form.elements.color.value.toUpperCase(), parentId: hasSubs ? null : val(form, 'parentId') || null });
+              close();
+              toast(isNew ? 'Categoria criada.' : 'Categoria atualizada.');
+              if (onSaved) onSaved(saved);
+            } catch (e) {
+              toast(e.message);
+            }
+          },
+        },
+      ],
+      onOpen: (form) => {
+        $$('#cat-type button', form).forEach((b) =>
+          b.addEventListener('click', () => {
+            $$('#cat-type button', form).forEach((x) => x.classList.toggle('on', x === b));
+            form.elements.parentId.innerHTML = parentOptions(b.dataset.inc === '1', '');
+          })
+        );
+        form.elements.parentId.addEventListener('change', () => {
+          const p = form.elements.parentId.value;
+          if (p && isNew) form.elements.color.value = P.categoryById(p).color.toLowerCase();
+        });
+      },
+    });
+  }
+
+  async function confirmDeleteCategory(cat) {
+    const used = store.categoryUsage(cat.id);
+    const subs = P.subcategoriesOf(cat.id);
+    const fallback = cat.parentId || (cat.income ? 'outrasReceitas' : 'outrosGastos');
+    openModal({
+      title: 'Excluir ' + P.categoryLabel(cat.id) + '?',
+      body:
+        (subs.length ? '<p>As ' + subs.length + ' subcategoria(s) também serão excluídas.</p>' : '') +
+        (used
+          ? '<p>' + used + ' lançamento(s) usam esta categoria. Para onde eles vão?</p>' +
+            field('Mover lançamentos para', '<select name="moveTo">' + P.categoriesFor(cat.income).filter((c) => c.id !== cat.id && c.parentId !== cat.id).map((c) => '<option value="' + c.id + '"' + (c.id === fallback ? ' selected' : '') + '>' + (c.depth ? '   ↳ ' : '') + esc(c.title) + '</option>').join('') + '</select>')
+          : '<p class="muted">Nenhum lançamento usa esta categoria.</p>'),
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Excluir',
+          cls: 'danger',
+          onClick: (close, form) => {
+            const moveTo = form.elements.moveTo ? form.elements.moveTo.value : fallback;
+            if (state.cashCategory && P.inCategory(state.cashCategory, cat.id)) state.cashCategory = null;
+            const moved = store.deleteCategory(cat.id, moveTo);
+            close();
+            toast('Categoria excluída' + (moved ? '; ' + moved + ' lançamento(s) movido(s) para ' + P.categoryLabel(moveTo) : '') + '.');
+          },
+        },
+      ],
+    });
+  }
+
+  function categoriesCard() {
+    const block = (income) =>
+      '<div class="group-head" style="margin-top:8px">' + (income ? 'Receitas' : 'Despesas') + '<button class="btn small" data-action="new-category" data-id="' + (income ? 'income' : 'expense') + '">+ Categoria</button></div><div class="list">' +
+      P.topCategories(income)
+        .map((c) => {
+          const subs = P.subcategoriesOf(c.id);
+          return (
+            '<div class="row cat-manage"><i class="dot" style="background:' + c.color + '"></i><div class="grow"><div class="title">' + esc(c.title) + (c.builtin ? '' : ' <span class="tag">sua</span>') + '</div>' +
+            (subs.length
+              ? '<div class="sub-list">' +
+                subs.map((sc) => '<span class="chip sub-chip"><i class="dot" style="background:' + sc.color + '"></i>' + esc(sc.title) + '<button class="linklike" title="Editar" data-action="edit-category" data-id="' + sc.id + '">✎</button><button class="linklike" title="Excluir" data-action="delete-category" data-id="' + sc.id + '">×</button></span>').join('') +
+                '</div>'
+              : '') +
+            '</div><button class="btn small ghost" data-action="new-subcategory" data-id="' + c.id + '">+ Subcategoria</button>' +
+            (c.builtin ? '' : '<button class="btn small" data-action="edit-category" data-id="' + c.id + '">Editar</button><button class="icon-btn" title="Excluir" data-action="delete-category" data-id="' + c.id + '">×</button>') +
+            '</div>'
+          );
+        })
+        .join('') +
+      '</div>';
+    return (
+      '<section class="card span-12" id="categories"><div class="card-head"><div><h3 class="card-title">Categorias do orçamento</h3><div class="card-sub">Crie categorias e subcategorias (ex.: Moradia › Condomínio). As categorias padrão não podem ser excluídas, mas aceitam subcategorias.</div></div></div>' +
+      '<div class="grid"><div class="span-6">' + block(false) + '</div><div class="span-6">' + block(true) + '</div></div></section>'
+    );
+  }
+
   function openTransactionForm(tx, income) {
     const isNew = !tx;
     const t = tx || { date: U.monthKey(U.today()) === state.cashMonth ? U.today() : state.cashMonth + '-01', amount: '', category: income ? 'salario' : 'mercado', note: '' };
-    const catOptions = (inc, sel) => P.CASH_CATEGORIES.filter((c) => c.income === inc).map((c) => '<option value="' + c.id + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.title) + '</option>').join('');
+    const catOptions = (inc, sel) => categoryOptions(inc, sel, true);
+    let currentIncome = income;
     const actions = [];
     if (!isNew) {
       actions.push({
@@ -1491,6 +1653,7 @@
       onClick: (close, form) => {
         const amount = U.parseNumber(val(form, 'amount'));
         if (!(amount > 0)) return form.elements.amount.focus();
+        if (val(form, 'category') === '__new') return form.elements.category.focus();
         store.saveTransaction({ id: tx ? tx.id : undefined, date: val(form, 'date') || U.today(), amount: Math.abs(amount), category: val(form, 'category'), note: val(form, 'note') });
         close();
       },
@@ -1507,11 +1670,13 @@
         $$('#tx-type button', form).forEach((b) =>
           b.addEventListener('click', () => {
             const inc = b.dataset.inc === '1';
+            currentIncome = inc;
             $$('#tx-type button', form).forEach((x) => x.classList.toggle('on', x === b));
             form.elements.category.innerHTML = catOptions(inc, inc ? 'salario' : 'mercado');
             $('.modal-head h2', form).textContent = isNew ? (inc ? 'Nova receita' : 'Nova despesa') : 'Editar lançamento';
           })
         );
+        bindNewCategory(form.elements.category, () => currentIncome);
       },
     });
   }

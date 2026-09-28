@@ -73,8 +73,66 @@
     { id: 'pets', title: 'Pets', income: false, color: '#A2845E' },
     { id: 'outrosGastos', title: 'Outros gastos', income: false, color: '#636366' },
   ];
+  P.CASH_CATEGORIES.forEach((c) => {
+    c.builtin = true;
+    c.parentId = null;
+  });
+
+  // Categorias e subcategorias criadas pelo usuário (ficam em data.customCategories).
+  let customCategories = [];
+  P.setCustomCategories = function (list) {
+    customCategories = list || [];
+  };
+  P.customCategories = function () {
+    return customCategories;
+  };
+
   P.categoryById = function (id) {
-    return P.CASH_CATEGORIES.find((c) => c.id === id) || P.CASH_CATEGORIES[P.CASH_CATEGORIES.length - 1];
+    return (
+      P.CASH_CATEGORIES.find((c) => c.id === id) ||
+      customCategories.find((c) => c.id === id) ||
+      P.CASH_CATEGORIES[P.CASH_CATEGORIES.length - 1]
+    );
+  };
+
+  P.categoryExists = function (id) {
+    return P.CASH_CATEGORIES.some((c) => c.id === id) || customCategories.some((c) => c.id === id);
+  };
+
+  /** Categorias principais (sem pai) de um tipo, na ordem: padrão e depois as criadas. */
+  P.topCategories = function (income) {
+    return P.CASH_CATEGORIES.filter((c) => c.income === income).concat(customCategories.filter((c) => c.income === income && !c.parentId));
+  };
+
+  P.subcategoriesOf = function (id) {
+    return customCategories.filter((c) => c.parentId === id);
+  };
+
+  /** Lista plana para seletores: cada categoria seguida das suas subcategorias. */
+  P.categoriesFor = function (income) {
+    const out = [];
+    P.topCategories(income).forEach((c) => {
+      out.push(Object.assign({ depth: 0 }, c));
+      P.subcategoriesOf(c.id).forEach((s) => out.push(Object.assign({ depth: 1 }, s)));
+    });
+    return out;
+  };
+
+  /** Categoria principal de uma subcategoria (ou a própria categoria). */
+  P.rootCategory = function (id) {
+    const c = P.categoryById(id);
+    return c.parentId ? P.categoryById(c.parentId) : c;
+  };
+
+  /** "Moradia › Condomínio" */
+  P.categoryLabel = function (id) {
+    const c = P.categoryById(id);
+    return c.parentId ? P.categoryById(c.parentId).title + ' › ' + c.title : c.title;
+  };
+
+  /** O lançamento da categoria `catId` pertence ao filtro `filterId` (inclui subcategorias)? */
+  P.inCategory = function (catId, filterId) {
+    return catId === filterId || P.categoryById(catId).parentId === filterId;
   };
 
   P.INSTITUTION_PRESETS = [
@@ -100,6 +158,7 @@
       snapshots: [],
       movements: [],
       transactions: [],
+      customCategories: [],
       settings: { goal: 0, hideValues: false, categoryRules: {} },
       benchmarks: { cdi: {}, ipca: {}, updated: null },
     };
@@ -143,6 +202,22 @@
         amount: Math.abs(num(m.amount)),
         note: str(m.note),
       }));
+    // Categorias criadas pelo usuário antes dos lançamentos, que podem usá-las.
+    const topIds = new Set(P.CASH_CATEGORIES.map((c) => c.id));
+    const rawCats = (raw.customCategories || []).filter((c) => c && c.id && c.title);
+    rawCats.filter((c) => !c.parentId).forEach((c) => topIds.add(str(c.id)));
+    d.customCategories = rawCats.map((c) => {
+      const parentId = c.parentId && topIds.has(str(c.parentId)) && str(c.parentId) !== str(c.id) ? str(c.parentId) : null;
+      return { id: str(c.id), title: str(c.title).trim(), income: c.income === true || c.income === 'true', color: str(c.color) || '#8E8E93', parentId };
+    });
+    // Subcategoria herda o tipo (receita/despesa) da categoria principal.
+    d.customCategories.forEach((c) => {
+      if (!c.parentId) return;
+      const parent = P.CASH_CATEGORIES.find((x) => x.id === c.parentId) || d.customCategories.find((x) => x.id === c.parentId);
+      if (parent) c.income = parent.income;
+    });
+    P.setCustomCategories(d.customCategories);
+
     d.transactions = (raw.transactions || [])
       .filter((t) => t && t.id && date(t.date))
       .map((t) => {
@@ -198,6 +273,7 @@
         const benchmarks = data.benchmarks;
         data = P.emptyData();
         data.benchmarks = benchmarks;
+        P.setCustomCategories(data.customCategories);
         store.commit();
       },
       async flush() {
@@ -332,6 +408,56 @@
         data.settings[key] = value;
         store.commit();
       },
+      // ---- Categorias personalizadas ----
+      saveCategory(cat) {
+        const title = String(cat.title || '').trim();
+        if (!title) throw new Error('Informe o nome da categoria.');
+        let parentId = cat.parentId || null;
+        let income = !!cat.income;
+        if (parentId) {
+          const parent = P.categoryById(parentId);
+          if (!P.categoryExists(parentId) || parent.parentId) throw new Error('Subcategorias só podem ficar dentro de uma categoria principal.');
+          income = parent.income;
+        }
+        const clash = P.categoriesFor(income).find((c) => U.norm(c.title) === U.norm(title) && (c.parentId || null) === parentId && c.id !== cat.id);
+        if (clash) throw new Error('Já existe uma categoria com esse nome.');
+        const list = data.customCategories;
+        let saved;
+        if (cat.id && list.find((c) => c.id === cat.id)) {
+          saved = list.find((c) => c.id === cat.id);
+          if (P.subcategoriesOf(saved.id).length && parentId) throw new Error('Uma categoria com subcategorias não pode virar subcategoria.');
+          Object.assign(saved, { title, income, color: cat.color || saved.color, parentId });
+        } else {
+          saved = { id: 'c_' + U.uid(), title, income, color: cat.color || (parentId ? P.categoryById(parentId).color : '#8E8E93'), parentId };
+          list.push(saved);
+        }
+        P.setCustomCategories(list);
+        store.commit();
+        return saved;
+      },
+      /** Exclui a categoria (e suas subcategorias) movendo os lançamentos para `moveTo`. */
+      deleteCategory(id, moveTo) {
+        const ids = new Set([id].concat(P.subcategoriesOf(id).map((c) => c.id)));
+        const target = moveTo && !ids.has(moveTo) ? moveTo : P.categoryById(id).income ? 'outrasReceitas' : 'outrosGastos';
+        let moved = 0;
+        data.transactions.forEach((t) => {
+          if (ids.has(t.category)) {
+            t.category = target;
+            t.income = P.categoryById(target).income;
+            moved++;
+          }
+        });
+        data.customCategories = data.customCategories.filter((c) => !ids.has(c.id));
+        const rules = data.settings.categoryRules || {};
+        Object.keys(rules).forEach((k) => ids.has(rules[k]) && (rules[k] = target));
+        P.setCustomCategories(data.customCategories);
+        store.commit();
+        return moved;
+      },
+      categoryUsage(id) {
+        return data.transactions.filter((t) => P.inCategory(t.category, id)).length;
+      },
+
       setBenchmarks(cdi, ipca) {
         data.benchmarks = { cdi, ipca, updated: new Date().toISOString() };
         store.commit();

@@ -78,3 +78,13 @@ test('regras de categoria e referência do extrato sobrevivem à planilha', () =
   assert.equal(back.transactions[0].ref, 'extrato:abc');
   assert.equal(back.settings.categoryRules['fulano de tal'], 'moradia');
 });
+
+test('categorias personalizadas sobrevivem à planilha', () => {
+  const { ctx } = loadGas();
+  const cats = [{ id: 'c_1', title: 'Condomínio', income: false, color: '#0A84FF', parentId: 'moradia' }];
+  const d = { institutions: [], assets: [], snapshots: [], movements: [], customCategories: cats, transactions: [{ id: 't1', date: '2026-09-01', amount: 10, category: 'c_1', income: false, note: 'x' }], settings: {}, benchmarks: {} };
+  ctx.saveData(JSON.stringify(d));
+  const back = JSON.parse(ctx.getData());
+  assert.equal(back.customCategories[0].parentId, 'moradia');
+  assert.equal(back.transactions[0].category, 'c_1');
+});

@@ -21,6 +21,8 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
 - **Carteira:** investimentos agrupados por instituição ou por classe, com busca, detalhe de cada ativo (gráfico, histórico, vencimento) e opção de arquivar.
 - **Atualizar:** o "fechamento do mês". Uma tabela com todos os investimentos agrupados por banco, onde você digita os saldos de uma vez e, se quiser, os aportes e resgates. O botão "=" repete o saldo anterior.
 - **Orçamento:** receitas e despesas por categoria, taxa de poupança e comparativo de 6 meses.
+  - **Interativo:** clique na rosca, nas categorias, nos totais, nas barras de mês ou de dia para filtrar a tela inteira.
+  - **Categorias e subcategorias próprias** (ex.: Moradia › Condomínio), criadas em Ajustes › Categorias ou direto no lançamento ("+ Nova categoria…"). Ao clicar numa categoria com subcategorias, a rosca abre o detalhamento dela.
   - **Importar extrato bancário (CSV)**, testado com o extrato de conta corrente do **Banco do Brasil**:
     - as linhas de saldo são ignoradas;
     - movimentações de investimento (BB Rende Fácil, poupança, Tesouro) vêm desmarcadas;
