@@ -27,6 +27,12 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
     - a categoria é sugerida pela descrição (posto → Transporte, condomínio → Moradia, fatura → Cartão…);
     - o app lembra a categoria que você escolher para cada favorecido;
     - importar o mesmo extrato de novo não duplica os lançamentos.
+  - **Importar fatura do cartão (PDF)**, testado com a fatura **Ourocard (BB)**:
+    - as compras são distribuídas nas categorias de despesa, pela seção da fatura (Restaurantes, Saúde, Supermercados…) ou pela descrição;
+    - parcelas ("PARC 17/21") entram no mês da fatura;
+    - estornos que anulam uma cobrança (ex.: anuidade + desconto) vêm desmarcados;
+    - o total selecionado é conferido com o "Total da Fatura".
+    - **Sem duplicidade:** ao importar faturas, o pagamento da fatura ("Pagto cartão crédito" no extrato) deixa de ser despesa. A prévia oferece remover os pagamentos já lançados que batem com o valor da fatura, e os próximos extratos trazem essa linha desmarcada.
 - **Ajustes:**
   - Importar a planilha em **CSV**, no formato de colunas por mês ou de lançamentos.
   - Exportar os dados em CSV e fazer backup e restauração em JSON.

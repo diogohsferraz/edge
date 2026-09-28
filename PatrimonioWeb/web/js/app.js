@@ -202,6 +202,7 @@
     'open-data-folder': () => g.desktopAPI && g.desktopAPI.openDataFolder(),
     'import-csv': () => pickFile('.csv,.txt,.tsv,text/csv', importCSV),
     'import-statement': () => pickFile('.csv,.txt,text/csv', openStatementPreview),
+    'import-invoice': () => pickPdf(openInvoicePreview),
     'import-json': () => pickFile('.json,application/json', importJSON),
     'export-csv': () => exportFile('patrimonio.csv', P.csv.exportPortfolio(store)),
     'export-tx': () => exportFile('orcamento.csv', P.csv.exportTransactions(store)),
@@ -732,7 +733,7 @@
 
     view.innerHTML =
       '<div class="toolbar"><button class="btn small" data-action="cash-prev">‹</button><strong style="min-width:170px;text-align:center">' + U.fmtMonthLong(mk) + '</strong><button class="btn small" data-action="cash-next">›</button>' +
-      '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
+      '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="import-invoice">Importar fatura (PDF)</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
       '<div class="grid">' +
       '<section class="card span-12"><div class="kpi-row" style="margin:0;padding:0;border:0">' +
       kpi('Receitas', '<span class="pos">' + money(income) + '</span>') +
@@ -803,7 +804,7 @@
         : '<p class="muted">Nenhuma instituição cadastrada.</p>') +
       '</div></section>' +
       '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel ou Google Planilhas salvando-a como CSV.</p>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="import-invoice">Importar fatura do cartão (PDF)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="export-csv"' + (d.assets.length ? '' : ' disabled') + '>Exportar investimentos</button><button class="btn" data-action="export-tx"' + (d.transactions.length ? '' : ' disabled') + '>Exportar orçamento</button></div></section>' +
       '<section class="card span-6"><h3 class="card-title">Backup</h3><p class="muted">Um arquivo com todos os dados. Serve também para levar seus dados entre a versão Windows e a versão web.</p>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="export-json">Exportar backup (.json)</button><button class="btn" data-action="import-json">Restaurar backup</button></div></section>' +
@@ -881,6 +882,68 @@
     }
   }
 
+  /** Tabela de prévia usada pelo extrato e pela fatura. */
+  function previewTable(rows) {
+    const catOptions = (r) =>
+      P.CASH_CATEGORIES.filter((c) => c.income === r.income)
+        .map((c) => '<option value="' + c.id + '"' + (c.id === r.category ? ' selected' : '') + '>' + esc(c.title) + '</option>')
+        .join('');
+    const tag = (t, title) => ' <span class="tag"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(t) + '</span>';
+    return (
+      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th></th><th>Data</th><th>Descrição</th><th style="text-align:right">Valor</th><th>Categoria</th></tr></thead><tbody>' +
+      rows
+        .map(
+          (r, i) =>
+            '<tr class="' + (r.include ? '' : 'off') + '">' +
+            '<td><input type="checkbox" data-st-inc="' + i + '"' + (r.include ? ' checked' : '') + (r.duplicate ? ' disabled' : '') + '></td>' +
+            '<td class="num" style="white-space:nowrap">' + U.fmtShortDate(r.date) + '</td>' +
+            '<td><div style="font-weight:550">' + esc(r.title) +
+            (r.investment ? tag('investimento') : '') +
+            (r.tags || []).map((t) => tag(t)).join('') +
+            (r.duplicate ? tag('já importado') : '') +
+            (r.remembered ? tag('lembrado', 'Categoria que você escolheu antes') : '') +
+            '</div><div class="faint">' + esc(r.details || (r.installment ? 'Parcela ' + r.installment.n + '/' + r.installment.total + ' · compra em ' + U.fmtDate(r.purchaseDate) : r.section ? 'Seção da fatura: ' + r.section.charAt(0).toUpperCase() + r.section.slice(1) : '')) + '</div></td>' +
+            '<td class="num ' + (r.income ? 'pos' : 'neg') + '" style="text-align:right;white-space:nowrap">' + (r.income ? '+' : '−') + U.money(r.amount) + '</td>' +
+            '<td><select data-st-cat="' + i + '" style="width:170px">' + catOptions(r) + '</select></td>' +
+            '</tr>'
+        )
+        .join('') +
+      '</tbody></table></div>'
+    );
+  }
+
+  function markKnown(rows) {
+    const known = new Set(store.data.transactions.map((t) => t.ref).filter(Boolean));
+    P.statement.applyRules(rows, store.data.settings.categoryRules);
+    rows.forEach((r) => {
+      r.duplicate = known.has(r.ref);
+      if (r.duplicate) r.include = false;
+    });
+  }
+
+  /** Lê as escolhas da tabela de volta para as linhas. */
+  function readPreview(form, rows) {
+    $$('[data-st-inc]', form).forEach((el) => (rows[el.dataset.stInc].include = el.checked));
+    $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
+  }
+
+  function bindPreviewTotals(form, rows, extra) {
+    const recalc = () => {
+      let inc = 0, exp = 0;
+      $$('[data-st-inc]', form).forEach((el) => {
+        const r = rows[el.dataset.stInc];
+        el.closest('tr').classList.toggle('off', !el.checked);
+        if (el.checked) r.income ? (inc += r.amount) : (exp += r.amount);
+      });
+      const i = $('#st-inc', form), e = $('#st-exp', form);
+      if (i) i.textContent = money(inc);
+      if (e) e.textContent = money(exp);
+      if (extra) extra(inc, exp);
+    };
+    $$('[data-st-inc]', form).forEach((el) => el.addEventListener('change', recalc));
+    recalc();
+  }
+
   function openStatementPreview(text) {
     let parsed;
     try {
@@ -889,42 +952,31 @@
       return openModal({ title: 'Não foi possível ler o extrato', body: '<p>' + esc(e.message) + '</p>' });
     }
     const { rows, skipped } = parsed;
-    P.statement.applyRules(rows, store.data.settings.categoryRules);
-    const known = new Set(store.data.transactions.map((t) => t.ref).filter(Boolean));
+    markKnown(rows);
+    // Com faturas detalhadas, o pagamento da fatura na conta é só uma transferência.
+    const itemized = !!store.data.settings.cardItemized;
+    let cardRows = 0;
     rows.forEach((r) => {
-      r.duplicate = known.has(r.ref);
-      if (r.duplicate) r.include = false;
+      if (itemized && !r.income && r.category === 'cartao') {
+        r.include = false;
+        r.tags = (r.tags || []).concat('fatura detalhada');
+        cardRows++;
+      }
     });
-    const catOptions = (r) =>
-      P.CASH_CATEGORIES.filter((c) => c.income === r.income)
-        .map((c) => '<option value="' + c.id + '"' + (c.id === r.category ? ' selected' : '') + '>' + esc(c.title) + '</option>')
-        .join('');
-    const inc = rows.filter((r) => r.include && r.income).reduce((a, r) => a + r.amount, 0);
-    const exp = rows.filter((r) => r.include && !r.income).reduce((a, r) => a + r.amount, 0);
     const dups = rows.filter((r) => r.duplicate).length;
     const body =
       '<p class="muted">Confira as categorias sugeridas antes de importar: o app lembra o que você escolher para cada favorecido nas próximas importações. Movimentações entre a conta e seus investimentos (ex.: BB Rende Fácil, poupança, Tesouro) vêm desmarcadas porque não são receita nem despesa.</p>' +
+      (cardRows
+        ? '<p class="muted"><strong>Pagamento de fatura desmarcado:</strong> você importa as faturas do cartão com as compras detalhadas, então o pagamento da fatura na conta não conta de novo como despesa.</p>'
+        : '') +
       '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
-      kpi('Entradas', '<span class="pos" id="st-inc">' + money(inc) + '</span>') +
-      kpi('Saídas', '<span class="neg" id="st-exp">' + money(exp) + '</span>') +
+      kpi('Entradas', '<span class="pos" id="st-inc"></span>') +
+      kpi('Saídas', '<span class="neg" id="st-exp"></span>') +
       kpi('Investimentos (desmarcados)', String(skipped.investment)) +
       kpi('Linhas de saldo ignoradas', String(skipped.balance)) +
       (dups ? kpi('Já importados', String(dups)) : '') +
       '</div>' +
-      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th></th><th>Data</th><th>Descrição</th><th style="text-align:right">Valor</th><th>Categoria</th></tr></thead><tbody>' +
-      rows
-        .map(
-          (r, i) =>
-            '<tr class="' + (r.include ? '' : 'off') + '">' +
-            '<td><input type="checkbox" data-st-inc="' + i + '"' + (r.include ? ' checked' : '') + (r.duplicate ? ' disabled' : '') + '></td>' +
-            '<td class="num" style="white-space:nowrap">' + U.fmtShortDate(r.date) + '</td>' +
-            '<td><div style="font-weight:550">' + esc(r.title) + (r.investment ? ' <span class="tag">investimento</span>' : '') + (r.duplicate ? ' <span class="tag">já importado</span>' : '') + (r.remembered ? ' <span class="tag" title="Categoria que você escolheu antes">lembrado</span>' : '') + '</div><div class="faint">' + esc(r.details) + '</div></td>' +
-            '<td class="num ' + (r.income ? 'pos' : 'neg') + '" style="text-align:right;white-space:nowrap">' + (r.income ? '+' : '−') + U.money(r.amount) + '</td>' +
-            '<td><select data-st-cat="' + i + '" style="width:170px">' + catOptions(r) + '</select></td>' +
-            '</tr>'
-        )
-        .join('') +
-      '</tbody></table></div>';
+      previewTable(rows);
     openModal({
       title: 'Importar extrato (' + rows.length + ' lançamentos)',
       wide: true,
@@ -935,30 +987,106 @@
           label: 'Importar selecionados',
           cls: 'primary',
           onClick: (close, form) => {
-            $$('[data-st-inc]', form).forEach((el) => (rows[el.dataset.stInc].include = el.checked));
-            $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
+            readPreview(form, rows);
             const res = P.statement.importRows(store, rows);
-            const last = rows.filter((r) => r.include).map((r) => r.date).sort().pop();
-            if (last) state.cashMonth = U.monthKey(last);
-            close();
-            if (state.view !== 'cashflow') go('cashflow');
-            toast(res.added + ' lançamento(s) importado(s)' + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.');
+            finishImport(close, rows, res.added + ' lançamento(s) importado(s)' + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.');
           },
         },
       ],
-      onOpen: (form) => {
-        const recalc = () => {
-          let i2 = 0, e2 = 0;
-          $$('[data-st-inc]', form).forEach((el) => {
-            const r = rows[el.dataset.stInc];
-            el.closest('tr').classList.toggle('off', !el.checked);
-            if (el.checked) r.income ? (i2 += r.amount) : (e2 += r.amount);
-          });
-          $('#st-inc', form).textContent = money(i2);
-          $('#st-exp', form).textContent = money(e2);
-        };
-        $$('[data-st-inc]', form).forEach((el) => el.addEventListener('change', recalc));
-      },
+      onOpen: (form) => bindPreviewTotals(form, rows),
+    });
+  }
+
+  function finishImport(close, rows, message) {
+    const last = rows.filter((r) => r.include).map((r) => r.date).sort().pop();
+    if (last) state.cashMonth = U.monthKey(last);
+    close();
+    if (state.view !== 'cashflow') go('cashflow');
+    toast(message);
+  }
+
+  function pickPdf(handler) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,application/pdf';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => handler(reader.result, file.name);
+      reader.readAsArrayBuffer(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async function openInvoicePreview(buffer) {
+    toast('Lendo a fatura…');
+    let parsed;
+    try {
+      const text = await P.invoice.extractText(buffer);
+      parsed = P.invoice.parseText(text);
+      if (!parsed.rows.length) throw new Error('Não encontrei lançamentos nesta fatura. O leitor foi feito para a fatura Ourocard (BB) em PDF.');
+    } catch (e) {
+      return openModal({ title: 'Não foi possível ler a fatura', body: '<p>' + esc(e.message || e) + '</p>' });
+    }
+    const { info, rows } = parsed;
+    markKnown(rows);
+    const payments = P.invoice.findCardPayments(store, parsed);
+    const dups = rows.filter((r) => r.duplicate).length;
+    const body =
+      '<p class="muted">As compras da fatura são distribuídas nas categorias de despesa. Para não contar o mesmo gasto duas vezes, <strong>o pagamento da fatura deixa de ser despesa</strong>: quem conta são as compras detalhadas. Parcelas entram no mês desta fatura; estornos que anulam uma cobrança vêm desmarcados.</p>' +
+      '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
+      kpi('Cartão', esc(info.issuer + (info.card ? ' final ' + info.card : ''))) +
+      kpi('Fechamento', info.closing ? U.fmtDate(info.closing) : '—') +
+      (info.due ? kpi('Vencimento', U.fmtDate(info.due)) : '') +
+      kpi('Total da fatura', info.total !== null ? U.money(info.total) : '—') +
+      kpi('Selecionado', '<span id="inv-sel"></span>') +
+      (dups ? kpi('Já importados', String(dups)) : '') +
+      '</div>' +
+      (payments.length
+        ? '<div class="card" style="margin-bottom:12px;background:var(--surface-2)"><strong>Pagamentos de fatura já lançados pelo extrato</strong>' +
+          '<div class="faint" style="margin-bottom:6px">Marque para remover do Orçamento. Os que batem com o valor desta fatura ou do saldo anterior já vêm marcados.</div>' +
+          payments
+            .map(
+              (p) =>
+                '<label class="check" style="margin:4px 0"><input type="checkbox" data-remove-pay="' + p.tx.id + '"' + (p.suggested ? ' checked' : '') + '> ' +
+                U.fmtDate(p.tx.date) + ' · ' + esc(p.tx.note || 'Fatura do cartão') + ' · <strong class="num">' + U.money(p.tx.amount) + '</strong></label>'
+            )
+            .join('') +
+          '</div>'
+        : '') +
+      previewTable(rows);
+    openModal({
+      title: 'Importar fatura (' + rows.filter((r) => r.kind === 'purchase').length + ' compras)',
+      wide: true,
+      body,
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Importar selecionados',
+          cls: 'primary',
+          onClick: (close, form) => {
+            readPreview(form, rows);
+            const remove = $$('[data-remove-pay]', form).filter((el) => el.checked).map((el) => el.dataset.removePay);
+            const res = P.invoice.importRows(store, rows, remove);
+            finishImport(
+              close,
+              rows,
+              res.added + ' lançamento(s) da fatura importado(s)' + (res.removed ? ', ' + res.removed + ' pagamento(s) de fatura removido(s)' : '') + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.'
+            );
+          },
+        },
+      ],
+      onOpen: (form) =>
+        bindPreviewTotals(form, rows, (inc, exp) => {
+          const sel = exp - inc;
+          const el = $('#inv-sel', form);
+          const ok = info.total !== null && Math.abs(sel - info.total) < 0.01;
+          el.innerHTML = U.money(sel) + (info.total !== null ? (ok ? ' <span class="pos" title="Confere com o total da fatura">✓</span>' : ' <span class="neg" title="Diferente do total da fatura">≠</span>') : '');
+        }),
     });
   }
 

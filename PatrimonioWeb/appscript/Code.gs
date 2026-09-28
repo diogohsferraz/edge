@@ -117,6 +117,7 @@ function getData() {
       var k = String(r[0] || '');
       if (k === 'goal') data.settings.goal = Number(r[1]) || 0;
       if (k === 'hideValues') data.settings.hideValues = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
+      if (k === 'cardItemized') data.settings.cardItemized = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
       if (k === 'categoryRules') {
         try { data.settings.categoryRules = JSON.parse(r[1]); } catch (e) { data.settings.categoryRules = {}; }
       }
@@ -163,9 +164,10 @@ function saveData(json) {
     var config = ss.getSheetByName(CONFIG_TAB) || ss.insertSheet(CONFIG_TAB);
     config.clearContents();
     var s = data.settings || {};
-    config.getRange(1, 1, 4, 2).setValues([
+    config.getRange(1, 1, 5, 2).setValues([
       ['goal', Number(s.goal) || 0],
       ['hideValues', s.hideValues === true],
+      ['cardItemized', s.cardItemized === true],
       ['categoryRules', JSON.stringify(s.categoryRules || {})],
       ['benchmarks', JSON.stringify(data.benchmarks || {})],
     ]);

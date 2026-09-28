@@ -32,7 +32,12 @@ const page_html = read('Index.html').replace(/<\?!= include\('(\w+)'\); \?>/g, (
       });
     window.google = { script: { run: make(null, null) } };
   });
-  await page.route('https://cdn.jsdelivr.net/**', (route) => route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(path.join(root, 'web', 'vendor', 'chart.umd.min.js')) }));
+  // CDN servido pelos arquivos locais (Chart.js e pdf.js).
+  await page.route('https://cdn.jsdelivr.net/**', (route) => {
+    const name = route.request().url().split('/').pop();
+    const local = { 'chart.umd.min.js': 'chart.umd.min.js', 'pdf.min.js': 'pdf.min.js', 'pdf.worker.min.js': 'pdf.worker.min.js' }[name];
+    route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(path.join(root, 'web', 'vendor', local)) });
+  });
   await page.route('https://script.test/', (route) => route.fulfill({ contentType: 'text/html', body: page_html }));
   await page.goto('https://script.test/');
   await page.waitForSelector('.empty');
@@ -51,15 +56,27 @@ const page_html = read('Index.html').replace(/<\?!= include\('(\w+)'\); \?>/g, (
   await page.click('.nav-item[data-view="settings"]');
   await page.waitForTimeout(500);
   const info = await page.textContent('#storage-info');
+  // Fatura em PDF: o pdf.js é carregado do CDN sob demanda.
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-action="import-invoice"]')]);
+  await chooser.setFiles(path.join(root, 'tests', 'fixtures', 'fatura-bb-exemplo.pdf'));
+  await page.waitForSelector('#inv-sel');
+  await page.waitForTimeout(300);
+  const invoiceSelected = await page.textContent('#inv-sel');
+  await page.click('.modal-foot .btn.primary');
+  await page.waitForTimeout(1500);
+  const orc = gas.ss.getSheetByName('Orçamento');
+  const invoiceRows = orc ? orc._cells.filter((r, i) => i > 0 && String(r[6] || '').startsWith('fatura:')).length : 0;
+  await page.click('.nav-item[data-view="settings"]');
+  await page.waitForTimeout(300);
   await page.click('[data-action="export-csv"]');
   await page.waitForSelector('.modal');
   const exportMsg = await page.textContent('.modal-body');
   if (outDir) await page.screenshot({ path: path.join(outDir, 'appscript-settings.png') });
   await browser.close();
 
-  const result = { label, rowsSaved, totalAfterReload, info, exportMsg: exportMsg.trim(), driveFiles: gas.files.map((f) => f.name), errors };
+  const result = { label, rowsSaved, totalAfterReload, info, invoiceSelected, invoiceRows, exportMsg: exportMsg.trim(), driveFiles: gas.files.map((f) => f.name), errors };
   console.log(JSON.stringify(result, null, 2));
-  const ok = label.includes('Planilha Google') && rowsSaved > 100 && /R\$/.test(totalAfterReload) && gas.files.length === 1 && !errors.length;
+  const ok = label.includes('Planilha Google') && rowsSaved > 100 && /R\$/.test(totalAfterReload) && gas.files.length === 1 && invoiceRows === 13 && /1\.371,00/.test(invoiceSelected) && !errors.length;
   process.exit(ok ? 0 : 1);
 })().catch((e) => {
   console.error(e);

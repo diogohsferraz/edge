@@ -9,7 +9,7 @@ function loadCore() {
   const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'statement.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'statement.js', 'invoice.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx, { filename: f });
   }
   return ctx.Patrimonio;
@@ -205,4 +205,74 @@ test('lembra a categoria escolhida para o favorecido na próxima importação', 
   assert.equal(row.category, 'moradia');
   assert.equal(row.remembered, true);
   assert.equal(second.find((r) => r.details === 'POSTO EXEMPLO').remembered, undefined);
+});
+
+test('lê a fatura do cartão (Ourocard BB) e distribui nas categorias', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'fatura-bb-exemplo.txt'), 'utf8');
+  const { info, rows } = P.invoice.parseText(text);
+  assert.equal(info.card, '1234');
+  assert.equal(info.closing, '2026-09-23');
+  assert.equal(info.due, '2026-10-05');
+  near(info.total, 1371);
+  near(info.previous, 1500);
+
+  const included = rows.filter((r) => r.include);
+  const net = included.reduce((a, r) => a + (r.income ? -r.amount : r.amount), 0);
+  near(net, 1371); // confere com o total da fatura
+
+  const by = (title) => rows.find((r) => r.title.startsWith(title));
+  assert.equal(by('PADARIA').category, 'alimentacao'); // seção "Restaurantes" do banco
+  assert.equal(by('ASSAI').category, 'mercado'); // seção "Serviços": pela descrição
+  assert.equal(by('EBN*SPOTIFY').category, 'assinaturas');
+  assert.equal(by('POSTO').category, 'transporte');
+  assert.equal(by('LOJA DESCONHECIDA').category, 'outrosGastos');
+  assert.equal(by('UNICOMPRA').category, 'mercado');
+
+  // Pagamento da fatura anterior não é despesa.
+  const pay = rows.find((r) => r.kind === 'payment');
+  assert.equal(pay.amount, 1500);
+  assert.equal(pay.include, false);
+
+  // Anuidade estornada: cobrança e crédito se anulam.
+  assert.equal(by('ANUIDADE').include, false);
+  assert.equal(by('DESC AUTOMATICO').include, false);
+
+  // Parcelas: a 17ª entra no mês da fatura; a 1ª, na data da compra.
+  const claro = by('CLARO');
+  assert.deepEqual({ ...claro.installment }, { n: 17, total: 21 });
+  assert.equal(claro.date, '2026-09-23');
+  assert.equal(claro.purchaseDate, '2026-04-22');
+  assert.equal(claro.category, 'contas');
+  assert.equal(by('HOTEL').purchaseDate, '2025-11-28');
+  assert.equal(by('LEROY').date, '2026-09-15');
+  assert.equal(by('LEROY').category, 'moradia');
+
+  // Compras iguais no mesmo dia continuam sendo duas.
+  assert.equal(rows.filter((r) => r.title.startsWith('LANCHONETE')).length, 2);
+  assert.equal(new Set(rows.map((r) => r.ref)).size, rows.length);
+});
+
+test('fatura: remove o pagamento lançado pelo extrato e não duplica ao reimportar', () => {
+  const store = P.createStore(memoryBackend());
+  // Extrato com "Pagto cartão crédito" de R$ 1.500,00 (a fatura anterior)
+  store.data.transactions.push({ id: 'pg', date: '2026-09-08', amount: 1500, category: 'cartao', income: false, note: 'Pagto cartão crédito', ref: 'extrato:x' });
+  store.data.transactions.push({ id: 'pg2', date: '2026-06-08', amount: 999, category: 'cartao', income: false, note: 'Pagto cartão crédito', ref: 'extrato:y' });
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'fatura-bb-exemplo.txt'), 'utf8');
+  const parsed = P.invoice.parseText(text);
+  const pays = P.invoice.findCardPayments(store, parsed);
+  assert.equal(pays.length, 2);
+  assert.equal(pays.find((p) => p.tx.id === 'pg').suggested, true);
+  assert.equal(pays.find((p) => p.tx.id === 'pg2').suggested, false);
+
+  const res = P.invoice.importRows(store, parsed.rows, ['pg']);
+  assert.equal(res.removed, 1);
+  assert.equal(res.added, parsed.rows.filter((r) => r.include).length);
+  assert.ok(!store.data.transactions.some((t) => t.id === 'pg'));
+  assert.equal(store.data.settings.cardItemized, true);
+  // Nenhuma regra de categoria "aprendida" só por causa da seção da fatura.
+  assert.equal(Object.keys(store.data.settings.categoryRules).length, 0);
+
+  const again = P.invoice.importRows(store, P.invoice.parseText(text).rows, []);
+  assert.equal(again.added, 0);
+  assert.ok(P.normalizeData(JSON.parse(JSON.stringify(store.data))).settings.cardItemized);
 });

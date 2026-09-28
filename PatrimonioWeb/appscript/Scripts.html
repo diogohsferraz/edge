@@ -348,7 +348,7 @@
         return out;
       });
     const s = raw.settings || {};
-    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {} };
+    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true' };
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
@@ -1135,17 +1135,17 @@
         ]
       : [
           ['cartao', ['cartao credito', 'cartao de credito', 'pagto cartao', 'fatura']],
-          ['impostos', ['imposto', 'darf', 'iptu', 'ipva', 'tributo', 'receita federal', 'taxa']],
-          ['moradia', ['edificio', 'condominio', 'aluguel', 'residencial', 'imobiliaria', 'res ']],
+          ['impostos', ['imposto', 'darf', 'iptu', 'ipva', 'tributo', 'receita federal', 'taxa', 'anuidade', 'anud', 'tarifa', 'iof ', 'encargo']],
+          ['moradia', ['edificio', 'condominio', 'aluguel', 'residencial', 'imobiliaria', 'res ', 'leroy', 'madebras', 'home ', 'moveis', 'decor', 'construc']],
           ['contas', ['energia', 'equatorial', 'neoenergia', 'enel', 'cemig', 'light', 'agua', 'casal', 'sabesp', 'internet', 'claro', 'vivo', 'tim ', 'oi ', 'net ', 'gas ']],
           ['transporte', ['posto', 'combust', 'shell', 'ipiranga', 'uber', '99 ', '99app', 'estacion', 'pedagio', 'sem parar', 'detran']],
-          ['compras', ['magazine', 'americanas', 'shopee', 'mercadolivre', 'mercado livre', 'amazon', 'shein', 'renner', 'riachuelo']],
-          ['mercado', ['supermerc', 'mercado', 'atacad', 'assai', 'carrefour', 'hortifruti', 'padaria', 'extra ', 'pao de acucar']],
+          ['compras', ['magazine', 'americanas', 'shopee', 'mercadolivre', 'mercadoliv', 'mercado livre', 'amazon', 'shein', 'renner', 'riachuelo', 'marisa', 'netshoes', 'cellshop']],
+          ['mercado', ['supermerc', 'mercado', 'atacad', 'assai', 'carrefour', 'hortifruti', 'padaria', 'extra ', 'pao de acucar', 'sams club', 'acougue', 'unicompra']],
           ['alimentacao', ['restaurante', 'ifood', 'lanche', 'burger', 'pizza', 'bar ', 'cafe']],
-          ['saude', ['farmacia', 'drogaria', 'drogasil', 'pague menos', 'hospital', 'clinica', 'laborat', 'unimed', 'hapvida', 'smartfit', 'academia', 'odonto', 'medic']],
-          ['educacao', ['escola', 'colegio', 'faculdade', 'curso', 'livraria', 'udemy']],
+          ['saude', ['farmacia', 'drogaria', 'drogasil', 'pague menos', 'hospital', 'clinica', 'laborat', 'unilab', 'unimed', 'hapvida', 'smartfit', 'academia', 'odonto', 'medic']],
+          ['educacao', ['escola', 'colegio', 'coleg', 'faculdade', 'curso', 'livraria', 'udemy']],
           ['assinaturas', ['netflix', 'spotify', 'amazon prime', 'disney', 'youtube', 'apple.com', 'google', 'hbo', 'globoplay']],
-          ['viagem', ['hotel', 'airbnb', 'latam', 'gol ', 'azul ', 'booking', 'decolar']],
+          ['viagem', ['hotel', 'hot ', 'pousada', 'airbnb', 'latam', 'gol ', 'azul ', 'booking', 'decolar', 'smiles', 'localiza', 'movida', 'rent ', 'turism']],
           ['pets', ['pet', 'veterin', 'cobasi', 'petz']],
           ['lazer', ['cinema', 'ingresso', 'show', 'teatro', 'steam', 'playstation']],
         ];
@@ -1238,7 +1238,7 @@
     rows.forEach((r) => {
       if (!r.include || r.investment) return;
       const key = S.ruleKey(r);
-      const guessed = S.guessCategory(r.title + ' ' + r.details, r.income);
+      const guessed = r.suggested !== undefined ? r.suggested : S.guessCategory(r.title + ' ' + r.details, r.income);
       if (key && r.category !== guessed) rules[key] = r.category;
       else if (key && rules[key] && r.category === guessed) delete rules[key];
     });
@@ -1254,6 +1254,257 @@
     });
     store.commit();
     return { added, duplicates };
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/invoice.js */
+/* Importação de fatura de cartão de crédito (PDF) para o Orçamento.
+ * Testado com a fatura Ourocard do Banco do Brasil. As compras são distribuídas nas categorias
+ * de despesa, e o pagamento da fatura passa a ser tratado como transferência para não contar
+ * o mesmo gasto duas vezes (compras detalhadas + "Pagto cartão crédito" do extrato). */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+  const I = (P.invoice = {});
+
+  /** Seções da fatura do BB → categoria do app (null = decidir pela descrição). */
+  I.SECTIONS = [
+    ['pagamentos/creditos', '__payments'],
+    ['restaurantes', 'alimentacao'],
+    ['supermercados', 'mercado'],
+    ['saude', 'saude'],
+    ['farmacias', 'saude'],
+    ['vestuario', 'compras'],
+    ['lojas de departamento', 'compras'],
+    ['educacao', 'educacao'],
+    ['lazer', 'lazer'],
+    ['entretenimento', 'lazer'],
+    ['viagens', 'viagem'],
+    ['turismo', 'viagem'],
+    ['hospedagem', 'viagem'],
+    ['transporte', 'transporte'],
+    ['combustivel', 'transporte'],
+    ['postos', 'transporte'],
+    ['telecomunicacoes', 'contas'],
+    ['servicos', null],
+    ['outros lancamentos', null],
+    ['compras parceladas', null],
+    ['compras internacionais', null],
+  ];
+
+  // ---------------------------------------------------------------------
+  // Leitura do PDF (pdf.js, carregado sob demanda)
+  // ---------------------------------------------------------------------
+
+  /** Endereços do pdf.js. O Apps Script troca por CDN no build. */
+  I.PDFJS_SOURCES = ['vendor/pdf.min.js', 'vendor/pdf.worker.min.js'];
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Não foi possível carregar o leitor de PDF (' + src + ').'));
+      document.head.appendChild(s);
+    });
+  }
+
+  I.loadPdfJs = async function () {
+    if (!g.pdfjsLib) {
+      for (const src of I.PDFJS_SOURCES) await loadScript(src);
+    }
+    // Com pdf.worker carregado como script comum, o pdf.js roda sem Web Worker
+    // (necessário para funcionar ao abrir o arquivo direto do disco e no Apps Script).
+    return g.pdfjsLib;
+  };
+
+  /** Extrai o texto do PDF, uma linha por linha visual. */
+  I.extractText = async function (arrayBuffer) {
+    const pdfjs = await I.loadPdfJs();
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer), isEvalSupported: false }).promise;
+    const pages = [];
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const content = await page.getTextContent();
+      const lines = [];
+      content.items.forEach((it) => {
+        if (!it.str || !it.str.trim()) return;
+        const y = it.transform[5];
+        let line = lines.find((l) => Math.abs(l.y - y) <= 2);
+        if (!line) lines.push((line = { y, items: [] }));
+        line.items.push({ x: it.transform[4], s: it.str });
+      });
+      lines.sort((a, b) => b.y - a.y);
+      pages.push(lines.map((l) => l.items.sort((a, b) => a.x - b.x).map((i) => i.s).join(' ')).join('\n'));
+    }
+    return pages.join('\n');
+  };
+
+  // ---------------------------------------------------------------------
+  // Interpretação do texto
+  // ---------------------------------------------------------------------
+
+  const money = (s) => U.parseNumber(String(s).replace(/\s/g, ''));
+  const brDate = (s) => {
+    const m = String(s || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    return m ? m[3] + '-' + m[2] + '-' + m[1] : null;
+  };
+
+  /** Uma compra "dd/mm" recebe o ano pela data de fechamento da fatura. */
+  function inferYear(ddmm, closingISO) {
+    const [d, m] = ddmm.split('/').map(Number);
+    const cy = Number(closingISO.slice(0, 4));
+    const cm = Number(closingISO.slice(5, 7));
+    const y = m > cm ? cy - 1 : cy;
+    const mk = y + '-' + String(m).padStart(2, '0');
+    return mk + '-' + String(Math.min(d, U.daysInMonth(mk))).padStart(2, '0');
+  }
+
+  function sectionIn(gapText) {
+    const t = U.norm(gapText);
+    let best = null;
+    let bestPos = -1;
+    I.SECTIONS.forEach(([name, cat]) => {
+      const pos = t.lastIndexOf(name);
+      if (pos > bestPos) {
+        bestPos = pos;
+        best = { name, cat };
+      }
+    });
+    return best;
+  }
+
+  function titleCase(s) {
+    return s.toLowerCase().replace(/(^|[\s*])(\S)/g, (m, sp, ch) => sp + ch.toUpperCase());
+  }
+
+  /**
+   * Interpreta o texto da fatura.
+   * @returns {{info: object, rows: Array}}
+   */
+  I.parseText = function (text) {
+    // "PARC 17/21" vira "PARC17de21" para não ser confundido com uma data de compra.
+    const flat = String(text || '')
+      .replace(/\s+/g, ' ')
+      .replace(/PARC\s?(\d{1,2})\/(\d{1,2})/gi, 'PARC$1de$2');
+    const nflat = U.norm(flat);
+    const info = {
+      issuer: /ourocard|banco do brasil|bb\.com\.br/.test(nflat) ? 'Ourocard (BB)' : 'Cartão',
+      card: (flat.match(/Final (\d{4})/) || flat.match(/Cart[aã]o (\d{4})/) || [])[1] || '',
+      closing: brDate((flat.match(/Fatura fechada em (\d{2}\/\d{2}\/\d{4})/i) || [])[1]),
+      due: brDate((flat.match(/Vencimento.{0,120}?(\d{2}\/\d{2}\/\d{4})/i) || [])[1]),
+      total: money((flat.match(/Total da Fatura R\$ ?(-?[\d.]+,\d{2})/i) || [])[1] || ''),
+      previous: money((flat.match(/Saldo fatura anterior R\$ ?(-?[\d.]+,\d{2})/i) || [])[1] || ''),
+    };
+    if (!info.closing) {
+      const any = flat.match(/(\d{2}\/\d{2}\/\d{4})/);
+      info.closing = any ? brDate(any[1]) : U.today();
+    }
+
+    const startIdx = flat.search(/Lan[cç]amentos nesta fatura/i);
+    const body = startIdx >= 0 ? flat.slice(startIdx) : flat;
+    const endIdx = body.search(/Total da Fatura/i);
+    const scope = endIdx > 0 ? body.slice(0, endIdx) : body;
+
+    // dd/mm  descrição (sem outra data)  país  R$ valor
+    const re = /(?:^|\s)(\d{2}\/\d{2})\s((?:(?!\s\d{2}\/\d{2}\s)(?!R\$).){2,90}?)\s([A-Z]{2})\sR\$\s?(-?\d{1,3}(?:\.\d{3})*,\d{2})/g;
+    const rows = [];
+    let section = null;
+    let last = 0;
+    let m;
+    const seen = {};
+    while ((m = re.exec(scope))) {
+      const gap = scope.slice(last, m.index);
+      const s = sectionIn(gap);
+      if (s) section = s;
+      last = re.lastIndex;
+
+      const rawDesc = m[2].replace(/\s+/g, ' ').trim();
+      const amountSigned = money(m[4]);
+      if (amountSigned === null || amountSigned === 0) continue;
+      const parc = rawDesc.match(/PARC(\d{1,2})de(\d{1,2})/i);
+      const desc = rawDesc.replace(/\s*(TIT-)?PARC\d{1,2}de\d{1,2}/i, '').replace(/\s*\|\s*/g, ' ').trim();
+      const purchaseDate = inferYear(m[1], info.closing);
+      const installment = parc ? { n: Number(parc[1]), total: Number(parc[2]) } : null;
+      // Parcelas a partir da 2ª pertencem ao mês desta fatura, não ao mês da compra.
+      const date = installment && installment.n > 1 ? info.closing : purchaseDate;
+      const isPaymentSection = section && section.cat === '__payments';
+      let kind = 'purchase';
+      if (amountSigned < 0) kind = isPaymentSection && /PGTO|PAGAMENTO|PAGTO/i.test(desc) ? 'payment' : 'credit';
+      else if (isPaymentSection) kind = 'credit';
+
+      const category =
+        kind === 'purchase'
+          ? (section && section.cat && section.cat !== '__payments' ? section.cat : P.statement.guessCategory(desc, false))
+          : 'outrasReceitas';
+      const baseRef = ['fatura', info.card, info.closing, purchaseDate, U.norm(desc), installment ? installment.n + '-' + installment.total : '', Math.abs(amountSigned).toFixed(2)].join(':');
+      seen[baseRef] = (seen[baseRef] || 0) + 1;
+      rows.push({
+        date,
+        purchaseDate,
+        title: desc,
+        details: '',
+        section: section ? section.name : '',
+        note: titleCase(desc) + (installment ? ' · parcela ' + installment.n + '/' + installment.total : ''),
+        amount: Math.abs(amountSigned),
+        income: kind !== 'purchase',
+        kind,
+        installment,
+        category,
+        suggested: category,
+        investment: false,
+        include: kind === 'purchase' || kind === 'credit',
+        ref: baseRef + ':' + seen[baseRef],
+        tags: [],
+      });
+    }
+
+    // Estorno/crédito com o mesmo valor de uma cobrança: os dois se anulam.
+    rows.filter((r) => r.kind === 'credit').forEach((credit) => {
+      const match = rows.find((r) => r.kind === 'purchase' && !r.pairedWith && Math.abs(r.amount - credit.amount) < 0.005);
+      if (match) {
+        match.pairedWith = credit.ref;
+        credit.pairedWith = match.ref;
+        match.include = false;
+        credit.include = false;
+        match.tags.push('estornado');
+        credit.tags.push('estorno');
+      }
+    });
+    rows.forEach((r) => {
+      if (r.kind === 'payment') r.tags.push('pagamento da fatura');
+      if (r.kind === 'credit' && !r.pairedWith) r.note = 'Crédito na fatura · ' + r.note;
+    });
+
+    info.purchasesTotal = rows.filter((r) => r.kind === 'purchase').reduce((a, r) => a + r.amount, 0);
+    info.creditsTotal = rows.filter((r) => r.kind === 'credit').reduce((a, r) => a + r.amount, 0);
+    info.paymentsTotal = rows.filter((r) => r.kind === 'payment').reduce((a, r) => a + r.amount, 0);
+    return { info, rows };
+  };
+
+  /**
+   * Pagamentos de fatura já lançados (vindos do extrato da conta) que representariam
+   * os mesmos gastos em dobro. Os que batem com o total desta fatura, com o saldo
+   * anterior ou com um pagamento listado nela vêm marcados para remoção.
+   */
+  I.findCardPayments = function (store, parsed) {
+    const targets = [parsed.info.total, parsed.info.previous]
+      .concat(parsed.rows.filter((r) => r.kind === 'payment').map((r) => r.amount))
+      .filter((v) => v > 0);
+    return store.data.transactions
+      .filter((t) => t.category === 'cartao' && !(t.ref || '').startsWith('fatura:'))
+      .map((t) => ({ tx: t, suggested: targets.some((v) => Math.abs(v - t.amount) < 0.01) }))
+      .sort((a, b) => (a.tx.date < b.tx.date ? 1 : -1));
+  };
+
+  /** Grava as compras escolhidas e remove os pagamentos de fatura marcados. */
+  I.importRows = function (store, rows, removePaymentIds) {
+    const remove = new Set(removePaymentIds || []);
+    if (remove.size) store.data.transactions = store.data.transactions.filter((t) => !remove.has(t.id));
+    store.data.settings.cardItemized = true;
+    const res = P.statement.importRows(store, rows.map((r) => Object.assign({}, r, { investment: false })));
+    return Object.assign(res, { removed: remove.size });
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -1906,6 +2157,7 @@
     'open-data-folder': () => g.desktopAPI && g.desktopAPI.openDataFolder(),
     'import-csv': () => pickFile('.csv,.txt,.tsv,text/csv', importCSV),
     'import-statement': () => pickFile('.csv,.txt,text/csv', openStatementPreview),
+    'import-invoice': () => pickPdf(openInvoicePreview),
     'import-json': () => pickFile('.json,application/json', importJSON),
     'export-csv': () => exportFile('patrimonio.csv', P.csv.exportPortfolio(store)),
     'export-tx': () => exportFile('orcamento.csv', P.csv.exportTransactions(store)),
@@ -2436,7 +2688,7 @@
 
     view.innerHTML =
       '<div class="toolbar"><button class="btn small" data-action="cash-prev">‹</button><strong style="min-width:170px;text-align:center">' + U.fmtMonthLong(mk) + '</strong><button class="btn small" data-action="cash-next">›</button>' +
-      '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
+      '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="import-invoice">Importar fatura (PDF)</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
       '<div class="grid">' +
       '<section class="card span-12"><div class="kpi-row" style="margin:0;padding:0;border:0">' +
       kpi('Receitas', '<span class="pos">' + money(income) + '</span>') +
@@ -2507,7 +2759,7 @@
         : '<p class="muted">Nenhuma instituição cadastrada.</p>') +
       '</div></section>' +
       '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel ou Google Planilhas salvando-a como CSV.</p>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="import-invoice">Importar fatura do cartão (PDF)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="export-csv"' + (d.assets.length ? '' : ' disabled') + '>Exportar investimentos</button><button class="btn" data-action="export-tx"' + (d.transactions.length ? '' : ' disabled') + '>Exportar orçamento</button></div></section>' +
       '<section class="card span-6"><h3 class="card-title">Backup</h3><p class="muted">Um arquivo com todos os dados. Serve também para levar seus dados entre a versão Windows e a versão web.</p>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="export-json">Exportar backup (.json)</button><button class="btn" data-action="import-json">Restaurar backup</button></div></section>' +
@@ -2585,6 +2837,68 @@
     }
   }
 
+  /** Tabela de prévia usada pelo extrato e pela fatura. */
+  function previewTable(rows) {
+    const catOptions = (r) =>
+      P.CASH_CATEGORIES.filter((c) => c.income === r.income)
+        .map((c) => '<option value="' + c.id + '"' + (c.id === r.category ? ' selected' : '') + '>' + esc(c.title) + '</option>')
+        .join('');
+    const tag = (t, title) => ' <span class="tag"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(t) + '</span>';
+    return (
+      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th></th><th>Data</th><th>Descrição</th><th style="text-align:right">Valor</th><th>Categoria</th></tr></thead><tbody>' +
+      rows
+        .map(
+          (r, i) =>
+            '<tr class="' + (r.include ? '' : 'off') + '">' +
+            '<td><input type="checkbox" data-st-inc="' + i + '"' + (r.include ? ' checked' : '') + (r.duplicate ? ' disabled' : '') + '></td>' +
+            '<td class="num" style="white-space:nowrap">' + U.fmtShortDate(r.date) + '</td>' +
+            '<td><div style="font-weight:550">' + esc(r.title) +
+            (r.investment ? tag('investimento') : '') +
+            (r.tags || []).map((t) => tag(t)).join('') +
+            (r.duplicate ? tag('já importado') : '') +
+            (r.remembered ? tag('lembrado', 'Categoria que você escolheu antes') : '') +
+            '</div><div class="faint">' + esc(r.details || (r.installment ? 'Parcela ' + r.installment.n + '/' + r.installment.total + ' · compra em ' + U.fmtDate(r.purchaseDate) : r.section ? 'Seção da fatura: ' + r.section.charAt(0).toUpperCase() + r.section.slice(1) : '')) + '</div></td>' +
+            '<td class="num ' + (r.income ? 'pos' : 'neg') + '" style="text-align:right;white-space:nowrap">' + (r.income ? '+' : '−') + U.money(r.amount) + '</td>' +
+            '<td><select data-st-cat="' + i + '" style="width:170px">' + catOptions(r) + '</select></td>' +
+            '</tr>'
+        )
+        .join('') +
+      '</tbody></table></div>'
+    );
+  }
+
+  function markKnown(rows) {
+    const known = new Set(store.data.transactions.map((t) => t.ref).filter(Boolean));
+    P.statement.applyRules(rows, store.data.settings.categoryRules);
+    rows.forEach((r) => {
+      r.duplicate = known.has(r.ref);
+      if (r.duplicate) r.include = false;
+    });
+  }
+
+  /** Lê as escolhas da tabela de volta para as linhas. */
+  function readPreview(form, rows) {
+    $$('[data-st-inc]', form).forEach((el) => (rows[el.dataset.stInc].include = el.checked));
+    $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
+  }
+
+  function bindPreviewTotals(form, rows, extra) {
+    const recalc = () => {
+      let inc = 0, exp = 0;
+      $$('[data-st-inc]', form).forEach((el) => {
+        const r = rows[el.dataset.stInc];
+        el.closest('tr').classList.toggle('off', !el.checked);
+        if (el.checked) r.income ? (inc += r.amount) : (exp += r.amount);
+      });
+      const i = $('#st-inc', form), e = $('#st-exp', form);
+      if (i) i.textContent = money(inc);
+      if (e) e.textContent = money(exp);
+      if (extra) extra(inc, exp);
+    };
+    $$('[data-st-inc]', form).forEach((el) => el.addEventListener('change', recalc));
+    recalc();
+  }
+
   function openStatementPreview(text) {
     let parsed;
     try {
@@ -2593,42 +2907,31 @@
       return openModal({ title: 'Não foi possível ler o extrato', body: '<p>' + esc(e.message) + '</p>' });
     }
     const { rows, skipped } = parsed;
-    P.statement.applyRules(rows, store.data.settings.categoryRules);
-    const known = new Set(store.data.transactions.map((t) => t.ref).filter(Boolean));
+    markKnown(rows);
+    // Com faturas detalhadas, o pagamento da fatura na conta é só uma transferência.
+    const itemized = !!store.data.settings.cardItemized;
+    let cardRows = 0;
     rows.forEach((r) => {
-      r.duplicate = known.has(r.ref);
-      if (r.duplicate) r.include = false;
+      if (itemized && !r.income && r.category === 'cartao') {
+        r.include = false;
+        r.tags = (r.tags || []).concat('fatura detalhada');
+        cardRows++;
+      }
     });
-    const catOptions = (r) =>
-      P.CASH_CATEGORIES.filter((c) => c.income === r.income)
-        .map((c) => '<option value="' + c.id + '"' + (c.id === r.category ? ' selected' : '') + '>' + esc(c.title) + '</option>')
-        .join('');
-    const inc = rows.filter((r) => r.include && r.income).reduce((a, r) => a + r.amount, 0);
-    const exp = rows.filter((r) => r.include && !r.income).reduce((a, r) => a + r.amount, 0);
     const dups = rows.filter((r) => r.duplicate).length;
     const body =
       '<p class="muted">Confira as categorias sugeridas antes de importar: o app lembra o que você escolher para cada favorecido nas próximas importações. Movimentações entre a conta e seus investimentos (ex.: BB Rende Fácil, poupança, Tesouro) vêm desmarcadas porque não são receita nem despesa.</p>' +
+      (cardRows
+        ? '<p class="muted"><strong>Pagamento de fatura desmarcado:</strong> você importa as faturas do cartão com as compras detalhadas, então o pagamento da fatura na conta não conta de novo como despesa.</p>'
+        : '') +
       '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
-      kpi('Entradas', '<span class="pos" id="st-inc">' + money(inc) + '</span>') +
-      kpi('Saídas', '<span class="neg" id="st-exp">' + money(exp) + '</span>') +
+      kpi('Entradas', '<span class="pos" id="st-inc"></span>') +
+      kpi('Saídas', '<span class="neg" id="st-exp"></span>') +
       kpi('Investimentos (desmarcados)', String(skipped.investment)) +
       kpi('Linhas de saldo ignoradas', String(skipped.balance)) +
       (dups ? kpi('Já importados', String(dups)) : '') +
       '</div>' +
-      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th></th><th>Data</th><th>Descrição</th><th style="text-align:right">Valor</th><th>Categoria</th></tr></thead><tbody>' +
-      rows
-        .map(
-          (r, i) =>
-            '<tr class="' + (r.include ? '' : 'off') + '">' +
-            '<td><input type="checkbox" data-st-inc="' + i + '"' + (r.include ? ' checked' : '') + (r.duplicate ? ' disabled' : '') + '></td>' +
-            '<td class="num" style="white-space:nowrap">' + U.fmtShortDate(r.date) + '</td>' +
-            '<td><div style="font-weight:550">' + esc(r.title) + (r.investment ? ' <span class="tag">investimento</span>' : '') + (r.duplicate ? ' <span class="tag">já importado</span>' : '') + (r.remembered ? ' <span class="tag" title="Categoria que você escolheu antes">lembrado</span>' : '') + '</div><div class="faint">' + esc(r.details) + '</div></td>' +
-            '<td class="num ' + (r.income ? 'pos' : 'neg') + '" style="text-align:right;white-space:nowrap">' + (r.income ? '+' : '−') + U.money(r.amount) + '</td>' +
-            '<td><select data-st-cat="' + i + '" style="width:170px">' + catOptions(r) + '</select></td>' +
-            '</tr>'
-        )
-        .join('') +
-      '</tbody></table></div>';
+      previewTable(rows);
     openModal({
       title: 'Importar extrato (' + rows.length + ' lançamentos)',
       wide: true,
@@ -2639,30 +2942,106 @@
           label: 'Importar selecionados',
           cls: 'primary',
           onClick: (close, form) => {
-            $$('[data-st-inc]', form).forEach((el) => (rows[el.dataset.stInc].include = el.checked));
-            $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
+            readPreview(form, rows);
             const res = P.statement.importRows(store, rows);
-            const last = rows.filter((r) => r.include).map((r) => r.date).sort().pop();
-            if (last) state.cashMonth = U.monthKey(last);
-            close();
-            if (state.view !== 'cashflow') go('cashflow');
-            toast(res.added + ' lançamento(s) importado(s)' + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.');
+            finishImport(close, rows, res.added + ' lançamento(s) importado(s)' + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.');
           },
         },
       ],
-      onOpen: (form) => {
-        const recalc = () => {
-          let i2 = 0, e2 = 0;
-          $$('[data-st-inc]', form).forEach((el) => {
-            const r = rows[el.dataset.stInc];
-            el.closest('tr').classList.toggle('off', !el.checked);
-            if (el.checked) r.income ? (i2 += r.amount) : (e2 += r.amount);
-          });
-          $('#st-inc', form).textContent = money(i2);
-          $('#st-exp', form).textContent = money(e2);
-        };
-        $$('[data-st-inc]', form).forEach((el) => el.addEventListener('change', recalc));
-      },
+      onOpen: (form) => bindPreviewTotals(form, rows),
+    });
+  }
+
+  function finishImport(close, rows, message) {
+    const last = rows.filter((r) => r.include).map((r) => r.date).sort().pop();
+    if (last) state.cashMonth = U.monthKey(last);
+    close();
+    if (state.view !== 'cashflow') go('cashflow');
+    toast(message);
+  }
+
+  function pickPdf(handler) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,application/pdf';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => handler(reader.result, file.name);
+      reader.readAsArrayBuffer(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async function openInvoicePreview(buffer) {
+    toast('Lendo a fatura…');
+    let parsed;
+    try {
+      const text = await P.invoice.extractText(buffer);
+      parsed = P.invoice.parseText(text);
+      if (!parsed.rows.length) throw new Error('Não encontrei lançamentos nesta fatura. O leitor foi feito para a fatura Ourocard (BB) em PDF.');
+    } catch (e) {
+      return openModal({ title: 'Não foi possível ler a fatura', body: '<p>' + esc(e.message || e) + '</p>' });
+    }
+    const { info, rows } = parsed;
+    markKnown(rows);
+    const payments = P.invoice.findCardPayments(store, parsed);
+    const dups = rows.filter((r) => r.duplicate).length;
+    const body =
+      '<p class="muted">As compras da fatura são distribuídas nas categorias de despesa. Para não contar o mesmo gasto duas vezes, <strong>o pagamento da fatura deixa de ser despesa</strong>: quem conta são as compras detalhadas. Parcelas entram no mês desta fatura; estornos que anulam uma cobrança vêm desmarcados.</p>' +
+      '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
+      kpi('Cartão', esc(info.issuer + (info.card ? ' final ' + info.card : ''))) +
+      kpi('Fechamento', info.closing ? U.fmtDate(info.closing) : '—') +
+      (info.due ? kpi('Vencimento', U.fmtDate(info.due)) : '') +
+      kpi('Total da fatura', info.total !== null ? U.money(info.total) : '—') +
+      kpi('Selecionado', '<span id="inv-sel"></span>') +
+      (dups ? kpi('Já importados', String(dups)) : '') +
+      '</div>' +
+      (payments.length
+        ? '<div class="card" style="margin-bottom:12px;background:var(--surface-2)"><strong>Pagamentos de fatura já lançados pelo extrato</strong>' +
+          '<div class="faint" style="margin-bottom:6px">Marque para remover do Orçamento. Os que batem com o valor desta fatura ou do saldo anterior já vêm marcados.</div>' +
+          payments
+            .map(
+              (p) =>
+                '<label class="check" style="margin:4px 0"><input type="checkbox" data-remove-pay="' + p.tx.id + '"' + (p.suggested ? ' checked' : '') + '> ' +
+                U.fmtDate(p.tx.date) + ' · ' + esc(p.tx.note || 'Fatura do cartão') + ' · <strong class="num">' + U.money(p.tx.amount) + '</strong></label>'
+            )
+            .join('') +
+          '</div>'
+        : '') +
+      previewTable(rows);
+    openModal({
+      title: 'Importar fatura (' + rows.filter((r) => r.kind === 'purchase').length + ' compras)',
+      wide: true,
+      body,
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Importar selecionados',
+          cls: 'primary',
+          onClick: (close, form) => {
+            readPreview(form, rows);
+            const remove = $$('[data-remove-pay]', form).filter((el) => el.checked).map((el) => el.dataset.removePay);
+            const res = P.invoice.importRows(store, rows, remove);
+            finishImport(
+              close,
+              rows,
+              res.added + ' lançamento(s) da fatura importado(s)' + (res.removed ? ', ' + res.removed + ' pagamento(s) de fatura removido(s)' : '') + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.'
+            );
+          },
+        },
+      ],
+      onOpen: (form) =>
+        bindPreviewTotals(form, rows, (inc, exp) => {
+          const sel = exp - inc;
+          const el = $('#inv-sel', form);
+          const ok = info.total !== null && Math.abs(sel - info.total) < 0.01;
+          el.innerHTML = U.money(sel) + (info.total !== null ? (ok ? ' <span class="pos" title="Confere com o total da fatura">✓</span>' : ' <span class="neg" title="Diferente do total da fatura">≠</span>') : '');
+        }),
     });
   }
 
@@ -2983,4 +3362,5 @@
   else init();
 })(window);
 
+Patrimonio.invoice.PDFJS_SOURCES = ["https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js","https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"];
 </script>

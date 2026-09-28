@@ -37,7 +37,12 @@ write(
     .replace(block('SCRIPTS'), () => `<script src="${CHART_CDN}"></script>\n  <?!= include('Scripts'); ?>`)
 );
 write(path.join(root, 'appscript', 'Styles.html'), `<style>\n${css}\n</style>\n`);
-write(path.join(root, 'appscript', 'Scripts.html'), `<script>\n${safe(bundle)}\n</script>\n`);
+// No Apps Script o pdf.js (leitura de faturas) vem do CDN, carregado só quando for usado.
+const PDFJS_CDN = ['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'];
+write(
+  path.join(root, 'appscript', 'Scripts.html'),
+  `<script>\n${safe(bundle)}\nPatrimonio.invoice.PDFJS_SOURCES = ${JSON.stringify(PDFJS_CDN)};\n</script>\n`
+);
 
 console.log('Windows (Electron):');
 const winWeb = path.join(root, 'windows', 'web');
@@ -50,5 +55,7 @@ write(
   path.join(root, 'dist', 'Patrimonio.html'),
   inlineFavicon(html)
     .replace(block('STYLES'), () => `<style>\n${css}\n</style>`)
-    .replace(block('SCRIPTS'), () => [...vendor.map((v) => `<script>\n${safe(read(v))}\n</script>`), `<script>\n${safe(bundle)}\n</script>`].join('\n'))
+    .replace(block('SCRIPTS'), () =>
+      [...vendor, 'vendor/pdf.min.js', 'vendor/pdf.worker.min.js'].map((v) => `<script>\n${safe(read(v))}\n</script>`).concat(`<script>\n${safe(bundle)}\n</script>`).join('\n')
+    )
 );
