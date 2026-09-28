@@ -78,6 +78,7 @@
       async info() {
         return { location: await api.dataPath() };
       },
+      resetBackups: () => (api.resetBackups ? api.resetBackups() : Promise.resolve()),
     };
   }
 

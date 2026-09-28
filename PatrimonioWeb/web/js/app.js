@@ -71,8 +71,25 @@
   // Inicialização
   // =====================================================================
 
-  function init() {
-    const backend = P.detectBackend();
+  let rawBackend = null;
+
+  /** Abre o app. Se os dados estão protegidos, pede usuário e senha antes. */
+  async function init() {
+    rawBackend = P.detectBackend();
+    let backend = rawBackend;
+    if (rawBackend.id !== 'appsscript') {
+      let raw = null;
+      try {
+        raw = await rawBackend.load();
+      } catch (e) {
+        raw = null; // o erro aparece de novo (com mensagem) no carregamento normal
+      }
+      if (P.vault.isEnvelope(raw)) backend = P.vault.wrap(rawBackend, await unlock(raw));
+    }
+    start(backend);
+  }
+
+  function start(backend) {
     store = P.createStore(backend);
     $('#storage-label').textContent = 'Dados: ' + backend.label;
     store.onChange((data, status, statusOnly) => {
@@ -103,11 +120,184 @@
       .then(() => {
         render();
         refreshBenchmarks(false);
+        if (store.backend.encrypted) startAutoLock();
+        else offerProtection();
       })
       .catch((err) => {
         console.error(err);
         $('#view').innerHTML = '<div class="card"><h2>Não foi possível carregar os dados</h2><p class="muted">' + esc(err && err.message ? err.message : err) + '</p></div>';
       });
+  }
+
+  // =====================================================================
+  // Acesso com usuário e senha
+  // =====================================================================
+
+  const protectable = () => rawBackend && rawBackend.id !== 'appsscript' && P.vault.available();
+  const LOCK_ICON = '<svg viewBox="0 0 24 24" width="44" height="44" style="color:var(--accent)"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9zm3 7a2 2 0 0 1 1 3.73V20h-2v-2.27A2 2 0 0 1 12 14z"/></svg>';
+
+  /** Tela de entrada. Resolve com a sessão (chave) quando usuário e senha conferem. */
+  function unlock(envelope) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'lock-screen';
+      wrap.innerHTML =
+        '<form class="lock-card" novalidate>' + LOCK_ICON +
+        '<h1>Patrimônio</h1><p class="muted">Seus dados estão protegidos. Entre com seu usuário e senha.</p>' +
+        field('Usuário', '<input type="text" name="user" autocomplete="username" autocapitalize="none" spellcheck="false">') +
+        field('Senha', '<input type="password" name="password" autocomplete="current-password">') +
+        '<p class="neg lock-error" role="alert"></p>' +
+        '<button class="btn primary" type="submit" style="width:100%">Entrar</button>' +
+        '<button class="linklike faint" type="button" data-forgot style="margin-top:14px">Esqueci a senha</button>' +
+        '</form>';
+      document.body.appendChild(wrap);
+      const form = $('form', wrap);
+      const err = $('.lock-error', wrap);
+      const btn = $('button[type=submit]', wrap);
+      let failures = 0;
+      setTimeout(() => form.elements.user.focus(), 30);
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = 'Abrindo…';
+        err.textContent = '';
+        try {
+          const { session } = await P.vault.open(envelope, form.elements.user.value, form.elements.password.value);
+          wrap.remove();
+          resolve(session);
+        } catch (ex) {
+          failures++;
+          form.elements.password.value = '';
+          form.elements.password.focus();
+          err.textContent = ex.message || 'Usuário ou senha incorretos.';
+          // Depois de 5 erros, espera 30 segundos a cada nova tentativa.
+          const wait = failures >= 5 ? 30 : 0;
+          btn.textContent = wait ? 'Aguarde 30 s' : 'Entrar';
+          setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = 'Entrar';
+          }, wait * 1000);
+        }
+      });
+      $('[data-forgot]', wrap).addEventListener('click', () => {
+        err.innerHTML = '';
+        const box = document.createElement('div');
+        box.className = 'lock-forgot';
+        box.innerHTML =
+          '<p>A senha não pode ser recuperada: ela é a chave que embaralha os dados. Se você tem um backup exportado (.json), apague os dados protegidos e restaure o backup em Ajustes.</p>' +
+          '<p>Para apagar, digite <strong>APAGAR</strong>:</p><input type="text" data-confirm autocomplete="off">' +
+          '<button class="btn danger" type="button" data-wipe style="width:100%;margin-top:8px">Apagar dados e recomeçar</button>';
+        $('[data-forgot]', wrap).replaceWith(box);
+        $('[data-wipe]', box).addEventListener('click', async () => {
+          if ($('[data-confirm]', box).value.trim().toUpperCase() !== 'APAGAR') return ($('[data-confirm]', box).focus(), undefined);
+          await rawBackend.save(P.emptyData());
+          g.location.reload();
+        });
+      });
+    });
+  }
+
+  /** Bloqueia depois de 15 minutos sem uso (grava as pendências antes). */
+  function startAutoLock() {
+    let last = Date.now();
+    ['mousemove', 'keydown', 'click', 'touchstart', 'wheel'].forEach((ev) => document.addEventListener(ev, () => (last = Date.now()), { passive: true }));
+    setInterval(() => {
+      if (Date.now() - last > 15 * 60 * 1000) lockNow();
+    }, 30000);
+  }
+
+  async function lockNow() {
+    await store.flush();
+    g.location.reload();
+  }
+
+  /** Na primeira vez com dados, sugere criar usuário e senha. */
+  function offerProtection() {
+    if (!protectable() || store.data.settings.securityDismissed || !store.data.assets.length) return;
+    openModal({
+      title: 'Proteja seus dados',
+      body: '<p>Crie um usuário e uma senha para abrir o Patrimônio. Os dados passam a ser gravados criptografados neste ' + (rawBackend.id === 'desktop' ? 'computador' : 'navegador') + ': sem a senha, ninguém consegue lê-los, nem abrindo o arquivo.</p>',
+      actions: [
+        { label: 'Agora não', onClick: (close) => (store.setSetting('securityDismissed', true), close()) },
+        { label: 'Criar usuário e senha', cls: 'primary', onClick: (close) => (close(), openProtectForm('create')) },
+      ],
+    });
+  }
+
+  /** mode: 'create' | 'change' | 'remove'. */
+  function openProtectForm(mode) {
+    const needsCurrent = mode !== 'create';
+    const needsNew = mode !== 'remove';
+    const titles = { create: 'Criar usuário e senha', change: 'Trocar usuário e senha', remove: 'Remover a proteção' };
+    openModal({
+      title: titles[mode],
+      body:
+        (needsCurrent ? '<div class="form-row">' + field('Usuário atual', '<input type="text" name="curUser" autocomplete="username" autocapitalize="none">') + field('Senha atual', '<input type="password" name="curPass" autocomplete="current-password">') + '</div>' : '') +
+        (needsNew
+          ? field('Usuário', '<input type="text" name="user" autocomplete="username" autocapitalize="none" spellcheck="false">', 'Pode ser seu nome ou e-mail. Maiúsculas e minúsculas não fazem diferença.') +
+            '<div class="form-row">' + field('Senha', '<input type="password" name="password" autocomplete="new-password">', 'Pelo menos 6 caracteres.') + field('Repita a senha', '<input type="password" name="password2" autocomplete="new-password">') + '</div>' +
+            '<label class="check" style="align-items:flex-start"><input type="checkbox" name="ack" style="margin-top:3px"> <span>Entendi que, se eu esquecer a senha, os dados não podem ser recuperados. Vou guardar um backup (Ajustes › Exportar backup).</span></label>'
+          : '<p>Os dados voltam a ser gravados sem criptografia e o app abre sem pedir senha.</p>') +
+        '<p class="neg" data-err style="font-size:13px"></p>',
+      actions: [
+        { label: 'Cancelar' },
+        {
+          label: mode === 'remove' ? 'Remover proteção' : 'Salvar',
+          cls: mode === 'remove' ? 'danger' : 'primary',
+          submit: true,
+          onClick: async (close, form) => {
+            const errEl = $('[data-err]', form);
+            const f = form.elements;
+            errEl.textContent = '';
+            try {
+              if (needsCurrent) {
+                const env = await rawBackend.load();
+                if (!P.vault.isEnvelope(env)) throw new Error('Os dados não estão protegidos.');
+                await P.vault.open(env, f.curUser.value, f.curPass.value);
+              }
+              let session = null;
+              if (needsNew) {
+                if (f.password.value !== f.password2.value) throw new Error('As senhas não conferem.');
+                if (!f.ack.checked) throw new Error('Confirme que entendeu que a senha não pode ser recuperada.');
+                session = await P.vault.createSession(f.user.value, f.password.value);
+              }
+              await store.flush();
+              store.backend = session ? P.vault.wrap(rawBackend, session) : rawBackend;
+              store.commit();
+              await store.flush();
+              if (session && rawBackend.resetBackups) await rawBackend.resetBackups();
+              close();
+              toast(mode === 'remove' ? 'Proteção removida.' : 'Pronto: os dados estão protegidos com usuário e senha.');
+              if (mode === 'create') startAutoLock();
+              render();
+            } catch (ex) {
+              errEl.textContent = ex.message || String(ex);
+            }
+          },
+        },
+      ],
+    });
+  }
+
+  function securityCard() {
+    if (!rawBackend) return '';
+    let body;
+    if (rawBackend.id === 'appsscript') {
+      body = '<p class="muted">O acesso é protegido pela sua conta Google: com a implantação "Somente eu", só você entra no app e na planilha. Para mais segurança, ative a verificação em duas etapas na sua Conta Google.</p>';
+    } else if (!P.vault.available()) {
+      body = '<p class="muted">Este navegador não oferece criptografia. Use o app do Windows ou um navegador atualizado para proteger os dados com senha.</p>';
+    } else if (store.backend.encrypted) {
+      body =
+        '<p><span class="pos" style="font-weight:600">Protegido com usuário e senha.</span> <span class="muted">Os dados' + (rawBackend.id === 'desktop' ? ' e os backups automáticos' : '') + ' são gravados criptografados (AES-256). O app bloqueia sozinho depois de 15 minutos sem uso.</span></p>' +
+        '<p class="faint">O backup exportado (.json) não é criptografado: guarde-o num lugar seguro.</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="lock-now">Bloquear agora</button><button class="btn" data-action="protect-change">Trocar usuário e senha</button><button class="btn danger" data-action="protect-remove">Remover proteção</button></div>';
+    } else {
+      body =
+        '<p class="muted">Hoje qualquer pessoa que use este ' + (rawBackend.id === 'desktop' ? 'computador' : 'navegador') + ' consegue abrir seus dados. Crie um usuário e uma senha: o app passa a pedir o acesso ao abrir e grava tudo criptografado.</p>' +
+        '<button class="btn primary" data-action="protect-create">Criar usuário e senha</button>';
+    }
+    return '<section class="card span-6"><h3 class="card-title">Segurança</h3>' + body + '</section>';
   }
 
   function renderStatus(status) {
@@ -178,6 +368,10 @@
     },
     'pf-show-dashboard': () => go('dashboard'),
     'edit-plan': () => openPlanForm(),
+    'protect-create': () => openProtectForm('create'),
+    'protect-change': () => openProtectForm('change'),
+    'protect-remove': () => openProtectForm('remove'),
+    'lock-now': () => lockNow(),
     'new-asset': () => openAssetForm(null),
     'edit-asset': (id) => openAssetForm(store.asset(id)),
     'quick-update': (id) => openQuickUpdate(store.asset(id)),
@@ -1358,6 +1552,7 @@
       '<p>Última atualização: <strong>' + (bench.updated ? new Date(bench.updated).toLocaleString('pt-BR') : 'nunca') + '</strong></p>' +
       (state.benchError ? '<p class="neg" style="font-size:13px">' + esc(state.benchError) + '</p>' : '') +
       '<button class="btn" data-action="refresh-bench"' + (state.benchLoading ? ' disabled' : '') + '>' + (state.benchLoading ? 'Atualizando…' : 'Atualizar agora') + '</button></section>' +
+      securityCard() +
       categoriesCard() +
       '<section class="card span-12"><h3 class="card-title">Dados</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="sample">Carregar dados de exemplo</button><button class="btn danger" data-action="wipe">Apagar todos os dados</button></div></section>' +
       '</div>';
@@ -1774,6 +1969,32 @@
       parsed = JSON.parse(text);
     } catch (e) {
       return openModal({ title: 'Arquivo inválido', body: '<p>Esse arquivo não é um backup do Patrimônio.</p>' });
+    }
+    if (P.vault.isEnvelope(parsed)) {
+      // Backup automático protegido (pasta backups do app do Windows): pede usuário e senha.
+      return openModal({
+        title: 'Backup protegido',
+        body: '<p class="muted">Este backup está criptografado. Informe o usuário e a senha usados quando ele foi gravado.</p><div class="form-row">' +
+          field('Usuário', '<input type="text" name="user" autocomplete="username" autocapitalize="none">') + field('Senha', '<input type="password" name="password" autocomplete="current-password">') +
+          '</div><p class="neg" data-err style="font-size:13px"></p>',
+        actions: [
+          { label: 'Cancelar' },
+          {
+            label: 'Abrir',
+            cls: 'primary',
+            submit: true,
+            onClick: async (close, form) => {
+              try {
+                const { data } = await P.vault.open(parsed, form.elements.user.value, form.elements.password.value);
+                close();
+                importJSON(JSON.stringify(data));
+              } catch (ex) {
+                $('[data-err]', form).textContent = ex.message;
+              }
+            },
+          },
+        ],
+      });
     }
     if (!parsed || !Array.isArray(parsed.assets)) return openModal({ title: 'Arquivo inválido', body: '<p>Esse arquivo não é um backup do Patrimônio.</p>' });
     const ok = await confirmDialog('Restaurar backup?', 'Os dados atuais serão substituídos pelos do arquivo (' + parsed.assets.length + ' investimentos).', 'Restaurar', true);

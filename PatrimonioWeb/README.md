@@ -46,6 +46,12 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
     - o total selecionado é conferido com o "Total da Fatura".
     - **Compras parceladas:** a categoria escolhida para uma parcela vale para todas as parcelas da mesma compra, as já lançadas e as das próximas faturas.
     - **Sem duplicidade:** ao importar faturas, o pagamento da fatura ("Pagto cartão crédito" no extrato) deixa de ser despesa. A prévia oferece remover os pagamentos já lançados que batem com o valor da fatura, e os próximos extratos trazem essa linha desmarcada.
+- **Segurança (usuário e senha):**
+  - no Windows e no arquivo único, crie um usuário e uma senha em **Ajustes › Segurança**. O app passa a pedir o acesso ao abrir;
+  - os dados (e, no Windows, os backups automáticos) são gravados criptografados com AES-256, com a chave derivada do usuário e da senha (PBKDF2, 600 mil iterações). Sem a senha, o arquivo é ilegível;
+  - o app bloqueia sozinho depois de 15 minutos sem uso, e há o botão "Bloquear agora";
+  - **não há recuperação de senha**: guarde um backup exportado (.json) em lugar seguro;
+  - na versão Apps Script, quem protege o acesso é a sua conta Google (implantação "Somente eu").
 - **Ajustes:**
   - Importar a planilha do **Excel (.xlsx)** ou em **CSV**, no formato de colunas por mês ou de lançamentos.
   - **Planilha de evolução patrimonial** com um bloco por fechamento (data em cima; colunas Investimento, Banco e Valor; linha TOTAL):
@@ -65,7 +71,9 @@ Baixe o instalador na página **[Releases › Patrimônio para Windows](https://
 - `Patrimonio-Instalador-1.0.0.exe`: instala e cria um atalho no Menu Iniciar.
 - `Patrimonio-Portatil-1.0.0.exe`: roda direto, sem instalar (dá até para levar num pendrive).
 
-O executável não tem assinatura digital, então o Windows pode mostrar "O Windows protegeu o computador". Clique em **Mais informações › Executar assim mesmo**.
+O executável não tem assinatura digital, então o Windows pode mostrar "O Windows protegeu o computador". Clique em **Mais informações › Executar assim mesmo**. Outra forma: clique com o botão direito no .exe › **Propriedades** › marque **Desbloquear** › OK.
+
+Para assinar, é preciso um certificado de assinatura de código (Code Signing) de uma autoridade certificadora. O workflow do GitHub pode assinar automaticamente quando o certificado estiver cadastrado nos *secrets* do repositório.
 
 ### Gerar você mesmo
 ```bash
@@ -102,6 +110,7 @@ web/
     ├── xlsx.js       # leitor de arquivos do Excel (.xlsx)
     ├── blocks.js     # planilha de evolução patrimonial em blocos por data
     ├── planner.js    # "Onde aportar": alocação-alvo, divisão do aporte e prazo da meta
+    ├── vault.js      # usuário e senha: criptografia dos dados (AES-256-GCM + PBKDF2)
     ├── statement.js  # extrato bancário (CSV)
     ├── invoice.js    # fatura do cartão (PDF)
     ├── backends.js   # Planilha Google / arquivo no Windows / navegador

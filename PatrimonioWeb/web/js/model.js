@@ -241,6 +241,7 @@
     const s = raw.settings || {};
     d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true', installmentRules: s.installmentRules && typeof s.installmentRules === 'object' ? s.installmentRules : {} };
     if (s.plan && typeof s.plan === 'object') d.settings.plan = s.plan;
+    if (s.securityDismissed === true) d.settings.securityDismissed = true;
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
@@ -270,7 +271,7 @@
         listeners.push(fn);
       },
       async load() {
-        const raw = await backend.load();
+        const raw = await store.backend.load();
         data = P.normalizeData(raw);
         emit();
       },
@@ -538,7 +539,7 @@
     async function doSave() {
       setStatus('saving');
       try {
-        await backend.save(data);
+        await store.backend.save(data);
         setStatus('saved');
       } catch (e) {
         console.error(e);

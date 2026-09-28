@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   fetchText: (url) => ipcRenderer.invoke('net:fetchText', url),
   saveFile: (name, content) => ipcRenderer.invoke('file:save', name, content),
   openDataFolder: () => ipcRenderer.invoke('app:openDataFolder'),
+  resetBackups: () => ipcRenderer.invoke('backups:reset'),
 });

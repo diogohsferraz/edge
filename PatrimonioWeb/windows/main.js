@@ -89,6 +89,15 @@ ipcMain.handle('file:save', async (_e, name, content) => {
   return filePath;
 });
 ipcMain.handle('app:openDataFolder', () => shell.openPath(app.getPath('userData')));
+// Ao criar ou trocar a senha: apaga os backups antigos (sem senha ou com a senha anterior)
+// e guarda uma cópia nova, já criptografada.
+ipcMain.handle('backups:reset', () => {
+  if (fs.existsSync(backupDir())) {
+    fs.readdirSync(backupDir()).forEach((f) => fs.rmSync(path.join(backupDir(), f), { force: true }));
+  }
+  dailyBackup();
+  return true;
+});
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

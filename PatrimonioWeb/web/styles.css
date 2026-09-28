@@ -252,6 +252,15 @@ svg { fill: currentColor; }
 .plan-table input { width: 90px; text-align: right; }
 .plan-sum.bad { color: var(--red); font-weight: 600; }
 
+/* ---------- Tela de entrada (usuário e senha) ---------- */
+.lock-screen { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
+.lock-card { width: 100%; max-width: 380px; background: var(--surface); border-radius: 20px; box-shadow: var(--shadow); padding: 28px 24px; text-align: center; display: flex; flex-direction: column; align-items: stretch; }
+.lock-card svg { align-self: center; }
+.lock-card h1 { margin: 8px 0 4px; font-size: 24px; }
+.lock-card .field { text-align: left; }
+.lock-card .lock-error { min-height: 20px; margin: 0 0 10px; font-size: 13.5px; }
+.lock-forgot { text-align: left; font-size: 13.5px; margin-top: 14px; }
+
 /* ---------- Categorias ---------- */
 .cat-manage { align-items: flex-start; }
 .cat-manage .dot { margin-top: 6px; }
@@ -279,7 +288,7 @@ svg { fill: currentColor; }
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
 .field label { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .field .hint { font-size: 12px; color: var(--text-3); }
-input[type=text], input[type=date], input[type=number], select, textarea, .money-input {
+input[type=text], input[type=password], input[type=date], input[type=number], select, textarea, .money-input {
   border: 1px solid var(--border); background: var(--surface-2); border-radius: 10px;
   padding: 9px 11px; width: 100%; outline: none;
 }

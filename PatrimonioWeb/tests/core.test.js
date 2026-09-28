@@ -6,10 +6,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadCore() {
-  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp, TextDecoder, DecompressionStream };
+  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp, TextDecoder, TextEncoder, DecompressionStream, crypto, btoa, atob };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'planner.js', 'statement.js', 'invoice.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'planner.js', 'vault.js', 'statement.js', 'invoice.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx, { filename: f });
   }
   return ctx.Patrimonio;
@@ -524,4 +524,37 @@ test('subconjunto da análise e evolução por instituição e investimento', ()
 test('plano de aportes sobrevive à normalização', () => {
   const d = P.normalizeData({ settings: { plan: { profile: 'arrojado', monthly: 2000 } } });
   assert.equal(d.settings.plan.profile, 'arrojado');
+});
+
+// ---- Usuário e senha (dados criptografados) ----
+
+test('dados protegidos: gravam cifrados e só abrem com usuário e senha', async () => {
+  let disk = null;
+  const inner = { id: 'local', load: async () => (disk ? JSON.parse(disk) : null), save: async (d) => { disk = JSON.stringify(d); } };
+  const session = await P.vault.createSession('Diogo ', 'segredo123');
+  const store = P.createStore(P.vault.wrap(inner, session));
+  await store.load();
+  P.loadSampleData(store);
+  await store.flush();
+  assert.ok(!disk.includes('Tesouro'), 'nada legível no arquivo');
+  const env = JSON.parse(disk);
+  assert.ok(P.vault.isEnvelope(env));
+  await assert.rejects(P.vault.open(env, 'diogo', 'errada'), /incorretos/);
+  await assert.rejects(P.vault.open(env, 'outro', 'segredo123'), /incorretos/);
+  const { data, session: s2 } = await P.vault.open(env, 'DIOGO', 'segredo123'); // usuário sem diferenciar maiúsculas
+  assert.equal(data.assets.length, store.data.assets.length);
+  // Reabrindo com a sessão: carrega igual.
+  const store2 = P.createStore(P.vault.wrap(inner, s2));
+  await store2.load();
+  assert.equal(new P.Analytics(store2.data).total(), new P.Analytics(store.data).total());
+  // Remover a proteção: volta a gravar em claro.
+  store2.backend = inner;
+  store2.commit();
+  await store2.flush();
+  assert.ok(!P.vault.isEnvelope(JSON.parse(disk)) && JSON.parse(disk).assets.length > 0);
+});
+
+test('senha curta e usuário vazio são recusados', async () => {
+  await assert.rejects(P.vault.createSession('a', '123'), /6 caracteres/);
+  await assert.rejects(P.vault.createSession(' ', '123456'), /usuário/);
 });
