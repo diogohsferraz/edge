@@ -37,7 +37,14 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
     - **Compras parceladas:** a categoria escolhida para uma parcela vale para todas as parcelas da mesma compra, as já lançadas e as das próximas faturas.
     - **Sem duplicidade:** ao importar faturas, o pagamento da fatura ("Pagto cartão crédito" no extrato) deixa de ser despesa. A prévia oferece remover os pagamentos já lançados que batem com o valor da fatura, e os próximos extratos trazem essa linha desmarcada.
 - **Ajustes:**
-  - Importar a planilha em **CSV**, no formato de colunas por mês ou de lançamentos.
+  - Importar a planilha do **Excel (.xlsx)** ou em **CSV**, no formato de colunas por mês ou de lançamentos.
+  - **Planilha de evolução patrimonial** com um bloco por fechamento (data em cima; colunas Investimento, Banco e Valor; linha TOTAL):
+    - cada investimento vira um ativo com todo o histórico de saldos;
+    - "BB" vira Banco do Brasil e a classe é sugerida pelo nome (LCA → Renda Fixa, ticker → Ações…). Dá para ajustar a classe na prévia;
+    - a soma de cada fechamento é conferida com a linha TOTAL;
+    - investimentos repetidos no mesmo fechamento são somados; os que somem da planilha ficam com saldo zero e são arquivados;
+    - aportes e resgates são estimados a partir dos saldos, para a rentabilidade não contar dinheiro novo como ganho;
+    - importar de novo a mesma planilha não duplica nada.
   - Exportar os dados em CSV e fazer backup e restauração em JSON.
   - Cadastrar bancos, definir a meta, ocultar valores e carregar dados de exemplo.
 
@@ -82,6 +89,10 @@ web/
     ├── model.js      # classes de ativo, categorias, bancos e o armazenamento
     ├── analytics.js  # evolução, rentabilidade (Modified Dietz), alocação
     ├── csv.js        # importação e exportação de planilhas
+    ├── xlsx.js       # leitor de arquivos do Excel (.xlsx)
+    ├── blocks.js     # planilha de evolução patrimonial em blocos por data
+    ├── statement.js  # extrato bancário (CSV)
+    ├── invoice.js    # fatura do cartão (PDF)
     ├── backends.js   # Planilha Google / arquivo no Windows / navegador
     ├── charts.js     # gráficos
     ├── sample.js     # dados de exemplo

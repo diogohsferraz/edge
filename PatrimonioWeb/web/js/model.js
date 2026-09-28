@@ -144,6 +144,17 @@
     ['Avenue', '#1D3CB5'], ['Binance', '#D4A20B'], ['Tesouro Direto', '#2E7D32'],
   ].map(([name, color]) => ({ name, color }));
 
+  /** Siglas comuns → nome da instituição ("BB" → "Banco do Brasil"). */
+  const INSTITUTION_ALIASES = {
+    bb: 'Banco do Brasil', 'banco do brasil s.a.': 'Banco do Brasil', cef: 'Caixa', 'caixa economica': 'Caixa',
+    'caixa economica federal': 'Caixa', xp: 'XP Investimentos', btg: 'BTG Pactual', c6: 'C6 Bank', nu: 'Nubank',
+    'banco inter': 'Inter', 'clear corretora': 'Clear', mp: 'Mercado Pago',
+  };
+  P.institutionAlias = function (name) {
+    const label = String(name || '').trim();
+    return INSTITUTION_ALIASES[U.norm(label)] || label;
+  };
+
   P.PALETTE = ['#5E5CE6', '#0A84FF', '#30B0C7', '#34C759', '#FF9F0A', '#FF375F', '#AF52DE', '#A2845E'];
 
   // ---------------------------------------------------------------------
@@ -300,9 +311,12 @@
         return inst;
       },
       findOrCreateInstitution(name, autoCommit) {
-        const label = String(name || '').trim() || 'Sem instituição';
+        const typed = String(name || '').trim() || 'Sem instituição';
+        let inst = data.institutions.find((i) => U.norm(i.name) === U.norm(typed));
+        if (inst) return { inst, created: false };
+        const label = P.institutionAlias(typed);
         const key = U.norm(label);
-        let inst = data.institutions.find((i) => U.norm(i.name) === key);
+        inst = data.institutions.find((i) => U.norm(i.name) === key);
         if (inst) return { inst, created: false };
         const preset = P.INSTITUTION_PRESETS.find((p) => U.norm(p.name) === key);
         inst = { id: U.uid(), name: label, color: preset ? preset.color : P.PALETTE[data.institutions.length % P.PALETTE.length] };

@@ -10,7 +10,7 @@ function loadCore() {
   const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'statement.js', 'invoice.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'statement.js', 'invoice.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx);
   }
   return ctx.Patrimonio;

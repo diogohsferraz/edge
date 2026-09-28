@@ -6,10 +6,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadCore() {
-  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp };
+  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp, TextDecoder, DecompressionStream };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'statement.js', 'invoice.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'statement.js', 'invoice.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx, { filename: f });
   }
   return ctx.Patrimonio;
@@ -359,4 +359,95 @@ test('categoria de compra parcelada vale para todas as parcelas', () => {
   const round = P.normalizeData(JSON.parse(JSON.stringify(store.data)));
   assert.equal(round.transactions.filter((t) => t.group === claroSep.group).length, 2);
   assert.equal(round.settings.installmentRules[claroSep.group], 'moradia');
+});
+
+// ---- Planilha de evolução patrimonial em blocos (.xlsx) ----
+
+async function readFixtureXlsx() {
+  const buf = fs.readFileSync(path.join(__dirname, 'fixtures', 'evolucao-blocos-exemplo.xlsx'));
+  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
+  assert.ok(P.xlsx.isXlsx(ab));
+  return P.xlsx.read(ab);
+}
+
+test('lê o .xlsx: abas, textos, números e datas', async () => {
+  const sheets = await readFixtureXlsx();
+  assert.deepEqual([...sheets.map((s) => s.name)], ['Investimentos', 'Resumo']);
+  const rows = sheets[0].rows;
+  assert.equal(rows[0][0], '2025-01-31');
+  assert.equal(rows[0][6], '31/02/2025');
+  assert.equal(rows[1][0], 'Investimento');
+  assert.equal(rows[2][2], 1000);
+  assert.equal(rows[3][0], 'LCA POS CDI');
+  assert.equal(rows[5][0], null);
+});
+
+test('encontra os blocos por data, ignora tabelas auxiliares e soma repetidos', async () => {
+  const blocks = P.blocks.parse((await readFixtureXlsx())[0].rows);
+  assert.deepEqual([...blocks.map((b) => b.date)], ['2025-01-31', '2025-02-28', '2025-03-31']);
+  assert.equal(blocks[0].items.length, 4); // linhas em branco antes de "Caixa" não encerram o bloco
+  assert.equal(blocks[0].total, 13500);
+  assert.ok(!blocks.some((b) => b.items.some((it) => it.value === 999)));
+  const store = P.createStore(memoryBackend());
+  const plan = P.blocks.plan(store, blocks);
+  assert.ok(plan.checks.every((c) => c.ok));
+  const small = plan.assets.find((a) => a.name === 'Ações Small Caps');
+  assert.deepEqual([...small.values], [null, 500, 520]);
+  const caixa = plan.assets.find((a) => a.name === 'Caixa');
+  assert.equal(caixa.closedAt, 2);
+  assert.equal(plan.assets.find((a) => a.name === 'ITSA4').classId, 'acoes');
+  assert.equal(caixa.classId, 'conta');
+});
+
+test('importa a evolução com aportes e resgates estimados', async () => {
+  const blocks = P.blocks.parse((await readFixtureXlsx())[0].rows);
+  const store = P.createStore(memoryBackend());
+  const summary = P.blocks.apply(store, P.blocks.plan(store, blocks));
+  assert.equal(summary.assetsCreated, 6);
+  const names = store.data.institutions.map((i) => i.name).sort();
+  assert.deepEqual([...names], ['Banco do Brasil', 'Clear', 'Mercado Pago']);
+
+  const a = new P.Analytics(store.data, '2025-04-15');
+  assert.equal(a.total('2025-01-31'), 13500);
+  assert.equal(a.total('2025-02-28'), 14680);
+  assert.equal(a.total('2025-03-31'), 21780);
+
+  const byName = (n) => store.data.assets.find((x) => x.name === n);
+  const flows = (n) => [...store.movementsOf(byName(n).id).map((m) => m.date + ' ' + m.kind + ' ' + m.amount)];
+  assert.deepEqual(flows('Conta Corrente'), ['2025-01-31 aporte 1000', '2025-02-28 aporte 500', '2025-03-31 resgate 300']);
+  // Renda fixa: +0,8% é rendimento; +5.080 é aporte (menos o rendimento estimado).
+  assert.deepEqual(flows('LCA POS CDI'), ['2025-01-31 aporte 10000', '2025-03-31 aporte 4997.88']);
+  assert.deepEqual(flows('ITSA4'), ['2025-01-31 aporte 2000']);
+  assert.deepEqual(flows('Caixa'), ['2025-01-31 aporte 500', '2025-03-31 resgate 500']);
+  assert.equal(byName('Caixa').archived, true);
+  assert.equal(byName('ITSA4').ticker, 'ITSA4');
+  near(a.performanceFor('2025-02').gain, 80 + 100 + 0);
+
+  // Reimportar não duplica.
+  P.blocks.apply(store, P.blocks.plan(store, blocks));
+  assert.equal(store.data.assets.length, 6);
+  assert.deepEqual(flows('Conta Corrente'), ['2025-01-31 aporte 1000', '2025-02-28 aporte 500', '2025-03-31 resgate 300']);
+});
+
+test('sem estimativa, só posições abertas e zeradas viram movimentação', async () => {
+  const blocks = P.blocks.parse((await readFixtureXlsx())[0].rows);
+  const store = P.createStore(memoryBackend());
+  P.blocks.apply(store, P.blocks.plan(store, blocks), { estimateFlows: false });
+  const cc = store.data.assets.find((x) => x.name === 'Conta Corrente');
+  assert.equal(store.movementsOf(cc.id).length, 1);
+});
+
+test('blocos também funcionam a partir de CSV e o modelo é reconhecido', () => {
+  const blocks = P.blocks.parse(P.csv.parse(P.csv.TEMPLATE_BLOCKS));
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[1].items.length, 4);
+  assert.equal(blocks[1].total, 51050);
+  assert.ok(P.blocks.plan(P.createStore(memoryBackend()), blocks).checks.every((c) => c.ok));
+});
+
+test('data de bloco com dia inválido vai para o último dia do mês', () => {
+  assert.equal(P.blocks.parseDate('31/09/2020'), '2020-09-30');
+  assert.equal(P.blocks.parseDate('2020-07-06'), '2020-07-06');
+  assert.equal(P.blocks.parseDate('Investimento'), null);
+  assert.equal(P.institutionAlias('BB'), 'Banco do Brasil');
 });

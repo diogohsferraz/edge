@@ -211,7 +211,7 @@
     },
     'refresh-bench': () => refreshBenchmarks(true),
     'open-data-folder': () => g.desktopAPI && g.desktopAPI.openDataFolder(),
-    'import-csv': () => pickFile('.csv,.txt,.tsv,text/csv', importCSV),
+    'import-csv': () => pickSpreadsheet(),
     'import-statement': () => pickFile('.csv,.txt,text/csv', openStatementPreview),
     'import-invoice': () => pickPdf(openInvoicePreview),
     'import-json': () => pickFile('.json,application/json', importJSON),
@@ -937,8 +937,8 @@
             .join('')
         : '<p class="muted">Nenhuma instituição cadastrada.</p>') +
       '</div></section>' +
-      '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel ou Google Planilhas salvando-a como CSV.</p>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="import-invoice">Importar fatura do cartão (PDF)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
+      '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel (.xlsx) ou do Google Planilhas (baixe como .xlsx ou CSV), inclusive a de evolução patrimonial com um bloco por mês.</p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (Excel ou CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="import-invoice">Importar fatura do cartão (PDF)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="export-csv"' + (d.assets.length ? '' : ' disabled') + '>Exportar investimentos</button><button class="btn" data-action="export-tx"' + (d.transactions.length ? '' : ' disabled') + '>Exportar orçamento</button></div></section>' +
       '<section class="card span-6"><h3 class="card-title">Backup</h3><p class="muted">Um arquivo com todos os dados. Serve também para levar seus dados entre a versão Windows e a versão web.</p>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="export-json">Exportar backup (.json)</button><button class="btn" data-action="import-json">Restaurar backup</button></div></section>' +
@@ -993,22 +993,127 @@
       input.remove();
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
-        const buf = new Uint8Array(reader.result);
-        let text = new TextDecoder('utf-8').decode(buf);
-        // Planilhas salvas pelo Excel no Windows costumam vir em Windows-1252.
-        if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
-        handler(text, file.name);
-      };
+      reader.onload = () => handler(decodeText(reader.result), file.name);
       reader.readAsArrayBuffer(file);
     });
     document.body.appendChild(input);
     input.click();
   }
 
+  function decodeText(buffer) {
+    const buf = new Uint8Array(buffer);
+    const text = new TextDecoder('utf-8').decode(buf);
+    // Planilhas salvas pelo Excel no Windows costumam vir em Windows-1252.
+    return text.includes('\uFFFD') ? new TextDecoder('windows-1252').decode(buf) : text;
+  }
+
+  /** Planilha em Excel (.xlsx) ou CSV. */
+  function pickSpreadsheet() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.csv,.txt,.tsv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => (P.xlsx.isXlsx(reader.result) ? importXlsx(reader.result, file.name) : importCSV(decodeText(reader.result)));
+      reader.readAsArrayBuffer(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async function importXlsx(buffer, fileName) {
+    let sheets;
+    try {
+      sheets = await P.xlsx.read(buffer);
+    } catch (e) {
+      return openModal({ title: 'Não foi possível abrir a planilha', body: '<p>' + esc(e.message || e) + '</p>' });
+    }
+    for (const sh of sheets) {
+      const blocks = P.blocks.parse(sh.rows);
+      if (blocks.length) return openBlocksPreview(blocks, fileName);
+    }
+    // Sem blocos por data: tenta os formatos de CSV na primeira aba com dados.
+    const sheet = sheets.find((sh) => sh.rows.some((r) => r && r.some((v) => v !== null))) || sheets[0];
+    importCSV(P.xlsx.toCSV(sheet.rows));
+  }
+
+  /** Prévia da planilha de evolução patrimonial (um bloco por fechamento). */
+  function openBlocksPreview(blocks, fileName) {
+    const plan = P.blocks.plan(store, blocks);
+    const last = blocks[blocks.length - 1];
+    const lastTotal = last.items.reduce((acc, it) => acc + it.value, 0);
+    const bad = plan.checks.filter((c) => !c.ok);
+    const banks = new Set(plan.assets.map((a) => U.norm(a.bank)));
+    const hasData = store.data.assets.length > 0;
+    const classSelect = (a, i) =>
+      '<select data-bl-class="' + i + '" style="width:150px">' + P.ASSET_CLASSES.map((c) => '<option value="' + c.id + '"' + (c.id === a.classId ? ' selected' : '') + '>' + esc(c.title) + '</option>').join('') + '</select>';
+    const item = (v, l) => '<div class="item"><div class="v">' + v + '</div><div class="l">' + esc(l) + '</div></div>';
+    const assets = plan.assets
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => (y.a.lastValue > 0) - (x.a.lastValue > 0) || U.norm(x.a.bank).localeCompare(U.norm(y.a.bank)) || y.a.lastValue - x.a.lastValue);
+    const body =
+      '<p class="muted">Encontrei <strong>' + blocks.length + ' fechamentos</strong> em <em>' + esc(fileName || 'planilha') + '</em>. Cada investimento vira um ativo com o histórico de saldos. Quem some da planilha fica com saldo zero e é arquivado.</p>' +
+      '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
+      item(U.fmtDate(blocks[0].date) + ' a ' + U.fmtDate(last.date), 'Período') +
+      item(String(plan.assets.length), 'Investimentos em ' + banks.size + ' instituições') +
+      item(money(lastTotal), 'Patrimônio em ' + U.fmtDate(last.date)) +
+      item(bad.length ? '<span class="neg">' + bad.length + ' divergem</span>' : '<span class="pos">Todos conferem</span>', 'Soma × linha TOTAL') +
+      '</div>' +
+      (bad.length ? '<p class="neg" style="font-size:13px">A soma dos itens não bate com o TOTAL em: ' + bad.map((c) => U.fmtDate(c.date) + ' (' + money(c.sum) + ' × ' + money(c.total) + ')').join(', ') + '.</p>' : '') +
+      '<label class="check" style="margin:4px 0 2px"><input type="checkbox" id="bl-estimate" checked> Estimar aportes e resgates</label>' +
+      '<p class="faint" style="margin:0 0 12px">A planilha só tem saldos. Para a rentabilidade não contar dinheiro novo como ganho, o app estima as entradas e saídas: em conta corrente toda variação é entrada/saída; em renda fixa, Tesouro e poupança, o que passa do rendimento normal vira aporte ou resgate; em ações, a variação é rendimento. Posições novas contam como aporte e posições zeradas como resgate. Você pode conferir e apagar esses lançamentos no detalhe de cada investimento.</p>' +
+      (hasData ? '<p class="muted" style="font-size:13px">Você já tem investimentos cadastrados. Os que tiverem o mesmo nome e instituição recebem o histórico; saldos na mesma data são substituídos.</p>' : '') +
+      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th>Investimento</th><th>Classe</th><th>Período</th><th style="text-align:right">Último saldo</th></tr></thead><tbody>' +
+      assets
+        .map(({ a, i }) => {
+          const end = a.closedAt !== null ? blocks[a.closedAt].date : last.date;
+          return (
+            '<tr class="' + (a.lastValue > 0 ? '' : 'off') + '"><td><div style="font-weight:550">' + esc(a.name) +
+            (a.lastValue > 0 ? '' : ' <span class="tag">encerrado</span>') + (a.exists ? ' <span class="tag">já cadastrado</span>' : '') +
+            '</div><div class="faint">' + esc(P.institutionAlias(a.bank)) + '</div></td>' +
+            '<td>' + classSelect(a, i) + '</td>' +
+            '<td class="num faint" style="white-space:nowrap">' + U.fmtMonth(U.monthKey(blocks[a.first].date)) + ' – ' + U.fmtMonth(U.monthKey(end)) + '</td>' +
+            '<td class="num" style="text-align:right;white-space:nowrap">' + money(a.lastValue) + '</td></tr>'
+          );
+        })
+        .join('') +
+      '</tbody></table></div>';
+    openModal({
+      title: 'Importar evolução patrimonial',
+      wide: true,
+      body,
+      actions: [
+        { label: 'Cancelar' },
+        {
+          label: 'Importar ' + plan.assets.length + ' investimentos',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            $$('[data-bl-class]', form).forEach((el) => (plan.assets[el.dataset.blClass].classId = el.value));
+            const summary = P.blocks.apply(store, plan, { estimateFlows: $('#bl-estimate', form).checked });
+            close();
+            state.showArchived = false;
+            go('dashboard');
+            openModal({
+              title: 'Planilha importada',
+              body: '<p>' + esc(P.csv.describe(summary)) + '</p><p class="muted">Daqui em diante, use a tela <strong>Atualizar</strong> no fim de cada mês para lançar os saldos (e, se quiser, os aportes e resgates) de todos os investimentos de uma vez.</p>',
+              actions: [{ label: 'Ver carteira', onClick: (c) => (c(), go('portfolio')) }, { label: 'OK', cls: 'primary' }],
+            });
+          },
+        },
+      ],
+    });
+  }
+
   function importCSV(text) {
     const rows = P.csv.parse(text);
     if (rows.length && P.statement.isStatement(rows[0])) return openStatementPreview(text);
+    const blocks = P.blocks.parse(rows);
+    if (blocks.length) return openBlocksPreview(blocks);
     try {
       const summary = P.csv.importInto(store, text);
       openModal({ title: 'Importação concluída', body: '<p>' + esc(P.csv.describe(summary)) + '</p>', actions: [{ label: 'Ver carteira', cls: 'primary', onClick: (close) => (close(), go('portfolio')) }] });
@@ -1281,7 +1386,9 @@
       title: 'Como preparar sua planilha',
       wide: true,
       body:
-        '<p>No Excel use <strong>Arquivo › Salvar como › CSV</strong>. No Google Planilhas, <strong>Arquivo › Fazer download › CSV</strong>.</p>' +
+        '<p>Importe o arquivo do Excel (.xlsx) direto, ou um CSV. No Google Planilhas: <strong>Arquivo › Fazer download › Microsoft Excel (.xlsx)</strong>. Fórmulas entram com o valor calculado.</p>' +
+        '<h3 class="card-title" style="margin-top:14px">Evolução patrimonial em blocos</h3><p class="muted">Um bloco por fechamento, lado a lado: a data em cima e as colunas <strong>Investimento</strong>, <strong>Banco</strong> e <strong>Valor</strong> (colunas extras como % e Rendimento são ignoradas). O bloco termina na linha TOTAL, que serve para conferir a soma. Tabelas auxiliares com outros cabeçalhos ficam de fora. Antes de gravar, o app mostra uma prévia onde você ajusta a classe de cada investimento.</p>' +
+        '<pre class="code">' + esc(P.csv.TEMPLATE_BLOCKS) + '</pre>' +
         '<h3 class="card-title" style="margin-top:14px">Formato 1 — saldos por mês</h3><p class="muted">Uma linha por investimento e uma coluna por mês. É o formato mais comum de planilha de patrimônio. O primeiro saldo de cada investimento é considerado aporte inicial.</p>' +
         '<pre class="code">' + esc(P.csv.TEMPLATE_MONTHS) + '</pre><button class="btn small" data-action="download-template" data-id="meses">Baixar modelo</button>' +
         '<h3 class="card-title" style="margin-top:18px">Formato 2 — lançamentos</h3><p class="muted">Uma linha por data e investimento, com aportes, resgates e proventos, para uma rentabilidade exata.</p>' +

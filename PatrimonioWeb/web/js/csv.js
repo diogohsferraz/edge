@@ -290,4 +290,14 @@
     'XP;CDB 110% CDI;Renda Fixa;25.000;25.260;25.530',
     'XP;Tesouro IPCA+ 2035;Tesouro;8.000;8.120;8.090',
   ].join('\n');
+
+  CSV.TEMPLATE_BLOCKS = [
+    '31/01/2026;;;;31/03/2026',
+    'Investimento;Banco;Valor;;Investimento;Banco;Valor',
+    'Poupança;BB;5.000,00;;Poupança;BB;5.060,00',
+    'LCA pós CDI;BB;40.000,00;;LCA pós CDI;BB;40.850,00',
+    'ITSA4;Clear;2.062,00;;ITSA4;Clear;2.140,00',
+    ';;;;CDB;Mercado Pago;3.000,00',
+    'TOTAL;47.062,00;;;TOTAL;51.050,00',
+  ].join('\n');
 })(typeof window !== 'undefined' ? window : globalThis);

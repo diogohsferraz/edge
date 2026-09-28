@@ -340,6 +340,17 @@
     ['Avenue', '#1D3CB5'], ['Binance', '#D4A20B'], ['Tesouro Direto', '#2E7D32'],
   ].map(([name, color]) => ({ name, color }));
 
+  /** Siglas comuns → nome da instituição ("BB" → "Banco do Brasil"). */
+  const INSTITUTION_ALIASES = {
+    bb: 'Banco do Brasil', 'banco do brasil s.a.': 'Banco do Brasil', cef: 'Caixa', 'caixa economica': 'Caixa',
+    'caixa economica federal': 'Caixa', xp: 'XP Investimentos', btg: 'BTG Pactual', c6: 'C6 Bank', nu: 'Nubank',
+    'banco inter': 'Inter', 'clear corretora': 'Clear', mp: 'Mercado Pago',
+  };
+  P.institutionAlias = function (name) {
+    const label = String(name || '').trim();
+    return INSTITUTION_ALIASES[U.norm(label)] || label;
+  };
+
   P.PALETTE = ['#5E5CE6', '#0A84FF', '#30B0C7', '#34C759', '#FF9F0A', '#FF375F', '#AF52DE', '#A2845E'];
 
   // ---------------------------------------------------------------------
@@ -496,9 +507,12 @@
         return inst;
       },
       findOrCreateInstitution(name, autoCommit) {
-        const label = String(name || '').trim() || 'Sem instituição';
+        const typed = String(name || '').trim() || 'Sem instituição';
+        let inst = data.institutions.find((i) => U.norm(i.name) === U.norm(typed));
+        if (inst) return { inst, created: false };
+        const label = P.institutionAlias(typed);
         const key = U.norm(label);
-        let inst = data.institutions.find((i) => U.norm(i.name) === key);
+        inst = data.institutions.find((i) => U.norm(i.name) === key);
         if (inst) return { inst, created: false };
         const preset = P.INSTITUTION_PRESETS.find((p) => U.norm(p.name) === key);
         inst = { id: U.uid(), name: label, color: preset ? preset.color : P.PALETTE[data.institutions.length % P.PALETTE.length] };
@@ -1236,6 +1250,490 @@
     'XP;CDB 110% CDI;Renda Fixa;25.000;25.260;25.530',
     'XP;Tesouro IPCA+ 2035;Tesouro;8.000;8.120;8.090',
   ].join('\n');
+
+  CSV.TEMPLATE_BLOCKS = [
+    '31/01/2026;;;;31/03/2026',
+    'Investimento;Banco;Valor;;Investimento;Banco;Valor',
+    'Poupança;BB;5.000,00;;Poupança;BB;5.060,00',
+    'LCA pós CDI;BB;40.000,00;;LCA pós CDI;BB;40.850,00',
+    'ITSA4;Clear;2.062,00;;ITSA4;Clear;2.140,00',
+    ';;;;CDB;Mercado Pago;3.000,00',
+    'TOTAL;47.062,00;;;TOTAL;51.050,00',
+  ].join('\n');
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/xlsx.js */
+/* Leitor mínimo de planilhas Excel (.xlsx): abre o zip e lê as células (valores já calculados). */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const X = (P.xlsx = {});
+
+  /** Arquivo .xlsx (zip)? */
+  X.isXlsx = function (buffer) {
+    const b = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+    return b.length === 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 3 && b[3] === 4;
+  };
+
+  // ---------------------------------------------------------------------
+  // Zip
+  // ---------------------------------------------------------------------
+
+  function readZip(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const dv = new DataView(buffer);
+    let eocd = -1;
+    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('O arquivo não parece ser uma planilha .xlsx válida.');
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const entries = {};
+    for (let n = 0; n < count; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true);
+      const size = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true);
+      const extraLen = dv.getUint16(p + 30, true);
+      const commentLen = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      const name = new TextDecoder('utf-8').decode(bytes.subarray(p + 46, p + 46 + nameLen));
+      const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+      entries[name] = { method, data: bytes.subarray(start, start + size) };
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return entries;
+  }
+
+  async function inflate(data) {
+    if (X.inflateRaw) return X.inflateRaw(data);
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('Este navegador não consegue abrir .xlsx. Salve a planilha como CSV e importe o CSV.');
+    }
+    const ds = new DecompressionStream('deflate-raw');
+    const writer = ds.writable.getWriter();
+    writer.write(data).catch(() => {});
+    writer.close().catch(() => {});
+    const reader = ds.readable.getReader();
+    const chunks = [];
+    let len = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      len += value.length;
+    }
+    const out = new Uint8Array(len);
+    let o = 0;
+    chunks.forEach((c) => {
+      out.set(c, o);
+      o += c.length;
+    });
+    return out;
+  }
+
+  async function entryText(entries, name) {
+    const e = entries[name];
+    if (!e) return null;
+    const raw = e.method === 0 ? e.data : await inflate(e.data);
+    return new TextDecoder('utf-8').decode(raw);
+  }
+
+  // ---------------------------------------------------------------------
+  // XML
+  // ---------------------------------------------------------------------
+
+  function decode(s) {
+    return s
+      .replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(Number(d)))
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&');
+  }
+
+  function attr(attrs, name) {
+    const m = attrs.match(new RegExp('(?:^|\\s)' + name + '="([^"]*)"'));
+    return m ? decode(m[1]) : null;
+  }
+
+  /** Texto de um <si> ou <is>: junta os <t>, ignorando a guia fonética (<rPh>). */
+  function richText(xml) {
+    xml = xml.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '');
+    let out = '';
+    const re = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
+    let m;
+    while ((m = re.exec(xml))) out += decode(m[1]);
+    return out;
+  }
+
+  const DATE_FORMAT_IDS = new Set([14, 15, 16, 17, 22, 27, 28, 29, 30, 31, 34, 35, 36, 50, 51, 52, 53, 54, 57, 58]);
+
+  function isDateFormat(code) {
+    const s = String(code || '')
+      .replace(/"[^"]*"/g, '')
+      .replace(/\[[^\]]*\]/g, '')
+      .replace(/\\./g, '');
+    return /[dy]/i.test(s) || /m{3,}/i.test(s);
+  }
+
+  function parseStyles(xml) {
+    if (!xml) return [];
+    const custom = {};
+    let m;
+    const fmtRe = /<numFmt\b([^>]*)\/?>/g;
+    while ((m = fmtRe.exec(xml))) custom[attr(m[1], 'numFmtId')] = attr(m[1], 'formatCode');
+    const cellXfs = (xml.match(/<cellXfs\b[\s\S]*?<\/cellXfs>/) || [''])[0];
+    const out = [];
+    const xfRe = /<xf\b([^>]*?)\/?>/g;
+    while ((m = xfRe.exec(cellXfs))) {
+      const id = Number(attr(m[1], 'numFmtId') || 0);
+      out.push(DATE_FORMAT_IDS.has(id) || (custom[id] !== undefined && isDateFormat(custom[id])));
+    }
+    return out;
+  }
+
+  /** Número de série do Excel → "aaaa-mm-dd". */
+  X.serialToISO = function (serial, date1904) {
+    const days = Math.floor(serial) + (date1904 ? 1462 : 0);
+    const d = new Date(Math.round((days - 25569) * 86400000));
+    return d.toISOString().slice(0, 10);
+  };
+
+  function colIndex(ref) {
+    const letters = ref.replace(/[^A-Z]/gi, '').toUpperCase();
+    let n = 0;
+    for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n - 1;
+  }
+
+  function parseSheet(xml, shared, dateStyles, date1904) {
+    const rows = [];
+    const rowRe = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
+    const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    let rm;
+    let nextRow = 0;
+    while ((rm = rowRe.exec(xml))) {
+      const r = attr(rm[1], 'r');
+      const ri = r ? Number(r) - 1 : nextRow;
+      nextRow = ri + 1;
+      if (!rm[2]) continue;
+      const row = [];
+      let cm;
+      let nextCol = 0;
+      cellRe.lastIndex = 0;
+      while ((cm = cellRe.exec(rm[2]))) {
+        const ref = attr(cm[1], 'r');
+        const ci = ref ? colIndex(ref) : nextCol;
+        nextCol = ci + 1;
+        const body = cm[2] || '';
+        const t = attr(cm[1], 't') || 'n';
+        const vm = body.match(/<v>([\s\S]*?)<\/v>/);
+        const v = vm ? decode(vm[1]) : null;
+        let value = null;
+        if (t === 's') value = v === null ? null : shared[Number(v)];
+        else if (t === 'inlineStr') value = richText(body);
+        else if (t === 'str') value = v;
+        else if (t === 'b') value = v === '1';
+        else if (t === 'e') value = v;
+        else if (v !== null && v !== '') {
+          const num = Number(v);
+          const style = Number(attr(cm[1], 's') || 0);
+          value = dateStyles[style] && num > 0 && num < 2958466 ? X.serialToISO(num, date1904) : num;
+        }
+        if (value !== null && value !== undefined && value !== '') row[ci] = value;
+      }
+      if (row.length) rows[ri] = row;
+    }
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i]) rows[i] = [];
+      for (let j = 0; j < rows[i].length; j++) if (rows[i][j] === undefined) rows[i][j] = null;
+    }
+    return rows;
+  }
+
+  /**
+   * Lê um .xlsx. Devolve [{ name, rows }], onde rows é uma grade (array de linhas) com
+   * números, textos, booleanos e datas no formato "aaaa-mm-dd". Fórmulas trazem o valor calculado.
+   */
+  X.read = async function (buffer) {
+    const entries = readZip(buffer);
+    const wb = await entryText(entries, 'xl/workbook.xml');
+    if (!wb) throw new Error('O arquivo não parece ser uma planilha .xlsx válida.');
+    const rels = (await entryText(entries, 'xl/_rels/workbook.xml.rels')) || '';
+    const targets = {};
+    let m;
+    const relRe = /<Relationship\b([^>]*?)\/?>/g;
+    while ((m = relRe.exec(rels))) targets[attr(m[1], 'Id')] = attr(m[1], 'Target');
+
+    const sharedXml = await entryText(entries, 'xl/sharedStrings.xml');
+    const shared = [];
+    if (sharedXml) {
+      const siRe = /<si>([\s\S]*?)<\/si>|<si\/>/g;
+      while ((m = siRe.exec(sharedXml))) shared.push(m[1] ? richText(m[1]) : '');
+    }
+    const dateStyles = parseStyles(await entryText(entries, 'xl/styles.xml'));
+    const date1904 = /<workbookPr\b[^>]*date1904="(1|true)"/.test(wb);
+
+    const sheets = [];
+    const sheetRe = /<sheet\b([^>]*?)\/?>/g;
+    while ((m = sheetRe.exec(wb))) {
+      const target = targets[attr(m[1], 'r:id')];
+      if (!target) continue;
+      const path = target.startsWith('/') ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
+      const xml = await entryText(entries, path);
+      if (xml) sheets.push({ name: attr(m[1], 'name') || 'Planilha', rows: parseSheet(xml, shared, dateStyles, date1904) });
+    }
+    if (!sheets.length) throw new Error('Não encontrei nenhuma aba nesta planilha.');
+    return sheets;
+  };
+
+  /** Grade → texto CSV (;), para reaproveitar os importadores de CSV. */
+  X.toCSV = function (rows) {
+    const cell = (v) => {
+      if (v === null || v === undefined) return '';
+      let s;
+      if (typeof v === 'number') s = String(v).replace('.', ',');
+      else if (/^\d{4}-\d{2}-\d{2}$/.test(v)) s = v.slice(8, 10) + '/' + v.slice(5, 7) + '/' + v.slice(0, 4);
+      else s = String(v);
+      return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    return rows.map((r) => (r || []).map(cell).join(';')).join('\n');
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/blocks.js */
+/*
+ * Planilha de evolução patrimonial em blocos: um bloco por fechamento, lado a lado ou empilhados.
+ *
+ *     06/07/2020
+ *     Investimento        | Banco | Valor    | % | Rendimento
+ *     Poupança Ouro - 001 | BB    | 93,88    |
+ *     LCA POS CDI         | BB    | 47736,65 |
+ *     TOTAL               | 104034,21
+ *
+ * Tabelas auxiliares (resumo de ações, alocação alvo) ficam de fora: só entram blocos cujo
+ * cabeçalho tem "Investimento" e "Valor".
+ */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+  const B = (P.blocks = {});
+
+  B.NOTE = 'Estimado na importação da planilha';
+
+  const NAME_HEADERS = ['investimento', 'investimentos', 'ativo', 'aplicacao', 'produto'];
+  const BANK_HEADERS = ['banco', 'instituicao', 'corretora', 'local'];
+  const VALUE_HEADERS = ['valor', 'saldo', 'valor atual', 'saldo atual', 'total'];
+
+  /** Data de um cabeçalho de bloco. Aceita dia inválido ("31/09/2020" → 30/09/2020). */
+  B.parseDate = function (v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return v > 20000 && v < 80000 && P.xlsx ? P.xlsx.serialToISO(v) : null;
+    const s = String(v).trim();
+    let m, y, mo, d;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) [y, mo, d] = [+m[1], +m[2], +m[3]];
+    else if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/))) [y, mo, d] = [+m[3], +m[2], +m[1]];
+    else return P.csv && P.csv.parseMonthHeader(s);
+    if (y < 100) y += 2000;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 1990 || y > 2100) return null;
+    const mk = y + '-' + String(mo).padStart(2, '0');
+    return mk + '-' + String(Math.min(d, U.daysInMonth(mk))).padStart(2, '0');
+  };
+
+  const text = (v) => (v === null || v === undefined ? '' : String(v).trim());
+
+  /** Procura os blocos na grade (array de linhas). */
+  B.parse = function (rows) {
+    const blocks = [];
+    rows.forEach((row, r) => {
+      (row || []).forEach((cell, c) => {
+        if (!NAME_HEADERS.includes(U.norm(cell))) return;
+        let bankCol = -1;
+        let valueCol = -1;
+        for (let k = c + 1; k < Math.min(row.length, c + 6); k++) {
+          const h = U.norm(row[k]);
+          if (bankCol < 0 && BANK_HEADERS.includes(h)) bankCol = k;
+          else if (valueCol < 0 && VALUE_HEADERS.includes(h)) valueCol = k;
+        }
+        if (valueCol < 0) return;
+
+        // Data: nas linhas logo acima do cabeçalho.
+        let date = null;
+        for (let rr = r - 1; rr >= Math.max(0, r - 3) && !date; rr--) {
+          for (let k = c; k <= valueCol && !date; k++) date = B.parseDate((rows[rr] || [])[k]);
+        }
+        if (!date) return;
+
+        const items = [];
+        let total = null;
+        let blanks = 0;
+        for (let rr = r + 1; rr < rows.length; rr++) {
+          const line = rows[rr] || [];
+          const name = text(line[c]);
+          if (!name) {
+            if (++blanks >= 6) break;
+            continue;
+          }
+          blanks = 0;
+          const key = U.norm(name);
+          if (key.startsWith('total')) {
+            for (let k = c + 1; k <= valueCol && total === null; k++) total = U.parseNumber(line[k]);
+            break;
+          }
+          if (NAME_HEADERS.includes(key) || BANK_HEADERS.includes(key)) break;
+          const raw = line[valueCol];
+          let value = U.parseNumber(raw);
+          if (value === null) {
+            const t = text(raw);
+            if (/^[-–—]$/.test(t)) value = 0;
+            else if (t && !t.startsWith('#')) break; // cabeçalho de outra tabela
+            else continue;
+          }
+          items.push({ name, bank: bankCol >= 0 ? text(line[bankCol]) : '', value });
+        }
+        if (items.length) blocks.push({ date, total, items, row: r, col: c });
+      });
+    });
+    blocks.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.col - b.col));
+    // Duas colunas com a mesma data: fica a última.
+    return blocks.filter((b, i) => !blocks[i + 1] || blocks[i + 1].date !== b.date);
+  };
+
+  B.guessClass = function (name) {
+    const raw = text(name);
+    const t = U.norm(raw);
+    const ticker = raw.toUpperCase().match(/^([A-Z]{4})(\d{1,2})F?$/);
+    if (ticker) return Number(ticker[2]) >= 31 && Number(ticker[2]) <= 39 ? 'exterior' : 'acoes';
+    if (t === 'caixa' || t.startsWith('saldo')) return 'conta';
+    return P.matchClass(raw);
+  };
+
+  /**
+   * Como estimar aporte/resgate entre dois fechamentos de um ativo (a planilha só tem saldos):
+   * - conta corrente e dinheiro parado: toda variação é entrada ou saída de dinheiro;
+   * - renda fixa, Tesouro e poupança: variação dentro do que o ativo costuma render é rendimento;
+   *   o que passa disso vira aporte ou resgate, descontado um rendimento estimado de 0,8% ao mês;
+   * - fundos, previdência e outros: idem, com uma faixa mais larga de oscilação;
+ * - ações, FIIs, exterior e cripto: a variação é rendimento (salvo quando a posição abre ou zera).
+   */
+  function flowMode(classId, name) {
+    const t = U.norm(name);
+    if (classId === 'conta') return t.includes('poupanca') || t.includes('caixinha') || t.includes('cofrinho') ? 'fixed' : 'cash';
+    if (['rendaFixa', 'tesouro'].includes(classId)) return 'fixed';
+    if (['fundos', 'previdencia', 'outros'].includes(classId)) return 'mixed';
+    return 'market';
+  }
+
+  function estimateFlow(mode, classId, prev, value, days) {
+    if (prev <= 0) return value;
+    if (value <= 0) return -prev;
+    const delta = value - prev;
+    if (mode === 'cash') return delta;
+    if (mode === 'market') return 0;
+    const months = Math.max(days, 1) / 30.44;
+    const lo = -prev * (mode === 'mixed' ? 0.08 : classId === 'tesouro' ? 0.04 : 0.005);
+    const hi = prev * ((mode === 'mixed' ? 0.03 : 0.015) * months + (mode === 'mixed' ? 0.02 : 0.005));
+    if (delta >= lo && delta <= hi) return 0;
+    return delta - prev * 0.008 * months;
+  }
+
+  function findInst(store, name) {
+    const insts = store.data.institutions;
+    return insts.find((i) => U.norm(i.name) === U.norm(name)) || insts.find((i) => U.norm(i.name) === U.norm(P.institutionAlias(name)));
+  }
+
+  const keyOf = (bank, name) => U.norm(bank || 'Sem instituição') + '|' + U.norm(name);
+
+  /** Monta o plano de importação (para a prévia). */
+  B.plan = function (store, blocks) {
+    const map = {};
+    const list = [];
+    blocks.forEach((b, bi) => {
+      const seen = {};
+      b.items.forEach((it) => {
+        const k = keyOf(it.bank, it.name);
+        let a = map[k];
+        if (!a) {
+          a = map[k] = { key: k, name: it.name, bank: it.bank || 'Sem instituição', classId: B.guessClass(it.name), values: new Array(blocks.length).fill(null) };
+          list.push(a);
+        }
+        // O mesmo investimento duas vezes no mesmo fechamento: soma.
+        a.values[bi] = (seen[k] ? a.values[bi] : 0) + it.value;
+        seen[k] = true;
+      });
+    });
+    list.forEach((a) => {
+      a.first = a.values.findIndex((v) => v !== null);
+      let last = a.values.length - 1;
+      while (last >= 0 && a.values[last] === null) last--;
+      // Sumiu da planilha: saldo zero no fechamento seguinte.
+      a.closedAt = last < blocks.length - 1 ? last + 1 : null;
+      a.lastValue = a.closedAt !== null ? 0 : a.values[last];
+      const inst = findInst(store, a.bank);
+      const existing = inst && store.data.assets.find((x) => x.institutionId === inst.id && U.norm(x.name) === U.norm(a.name));
+      a.exists = !!existing;
+      if (existing) a.classId = existing.classId;
+    });
+    const checks = blocks.map((b) => {
+      const sum = b.items.reduce((acc, it) => acc + it.value, 0);
+      return { date: b.date, sum, total: b.total, ok: b.total === null || Math.abs(sum - b.total) < 0.05 };
+    });
+    return { blocks, assets: list, checks };
+  };
+
+  /** Grava o plano. `opts.estimateFlows` (padrão true); `plan.assets[i].classId` pode ter sido alterado na prévia. */
+  B.apply = function (store, plan, opts) {
+    opts = opts || {};
+    const estimate = opts.estimateFlows !== false;
+    const dates = plan.blocks.map((b) => b.date);
+    const summary = { institutionsCreated: 0, assetsCreated: 0, balances: 0, movements: 0, skipped: 0 };
+    const data = store.data;
+    plan.assets.forEach((p) => {
+      const r = store.findOrCreateInstitution(p.bank, false);
+      if (r.created) summary.institutionsCreated++;
+      let asset = data.assets.find((a) => a.institutionId === r.inst.id && U.norm(a.name) === U.norm(p.name));
+      if (!asset) {
+        const ticker = /^[A-Z]{4}\d{1,2}F?$/.test(p.name.trim().toUpperCase()) ? p.name.trim().toUpperCase() : '';
+        asset = store.saveAsset({ name: p.name, classId: p.classId, institutionId: r.inst.id, ticker, indexer: '', maturity: null, notes: '' }, 0, null, false);
+        summary.assetsCreated++;
+      } else asset.classId = p.classId;
+      // Reimportar a mesma planilha não duplica: troca as estimativas anteriores.
+      data.movements = data.movements.filter((m) => !(m.assetId === asset.id && m.note === B.NOTE));
+      const hasOwnFlows = data.movements.some((m) => m.assetId === asset.id);
+
+      const mode = flowMode(p.classId, p.name);
+      let prev = 0;
+      let prevDate = null;
+      const end = p.closedAt !== null ? p.closedAt : dates.length - 1;
+      for (let i = p.first; i <= end; i++) {
+        const value = i === p.closedAt ? 0 : p.values[i] === null ? 0 : p.values[i];
+        store.recordBalance(asset.id, dates[i], value, false);
+        summary.balances++;
+        if (!hasOwnFlows) {
+          const days = prevDate ? (new Date(dates[i]) - new Date(prevDate)) / 86400000 : 0;
+          let flow = prev <= 0 || value <= 0 || estimate ? estimateFlow(mode, p.classId, prev, value, days) : 0;
+          flow = Math.round(flow * 100) / 100;
+          if (Math.abs(flow) >= 0.01) {
+            store.recordMovement(asset.id, flow > 0 ? 'aporte' : 'resgate', Math.abs(flow), dates[i], B.NOTE, false);
+            summary.movements++;
+          }
+        }
+        prev = value;
+        prevDate = dates[i];
+      }
+      asset.archived = !(p.lastValue > 0);
+    });
+    store.commit();
+    return summary;
+  };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 /* js/statement.js */
@@ -2406,7 +2904,7 @@
     },
     'refresh-bench': () => refreshBenchmarks(true),
     'open-data-folder': () => g.desktopAPI && g.desktopAPI.openDataFolder(),
-    'import-csv': () => pickFile('.csv,.txt,.tsv,text/csv', importCSV),
+    'import-csv': () => pickSpreadsheet(),
     'import-statement': () => pickFile('.csv,.txt,text/csv', openStatementPreview),
     'import-invoice': () => pickPdf(openInvoicePreview),
     'import-json': () => pickFile('.json,application/json', importJSON),
@@ -3132,8 +3630,8 @@
             .join('')
         : '<p class="muted">Nenhuma instituição cadastrada.</p>') +
       '</div></section>' +
-      '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel ou Google Planilhas salvando-a como CSV.</p>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="import-invoice">Importar fatura do cartão (PDF)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
+      '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel (.xlsx) ou do Google Planilhas (baixe como .xlsx ou CSV), inclusive a de evolução patrimonial com um bloco por mês.</p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (Excel ou CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="import-invoice">Importar fatura do cartão (PDF)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="export-csv"' + (d.assets.length ? '' : ' disabled') + '>Exportar investimentos</button><button class="btn" data-action="export-tx"' + (d.transactions.length ? '' : ' disabled') + '>Exportar orçamento</button></div></section>' +
       '<section class="card span-6"><h3 class="card-title">Backup</h3><p class="muted">Um arquivo com todos os dados. Serve também para levar seus dados entre a versão Windows e a versão web.</p>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="export-json">Exportar backup (.json)</button><button class="btn" data-action="import-json">Restaurar backup</button></div></section>' +
@@ -3188,22 +3686,127 @@
       input.remove();
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
-        const buf = new Uint8Array(reader.result);
-        let text = new TextDecoder('utf-8').decode(buf);
-        // Planilhas salvas pelo Excel no Windows costumam vir em Windows-1252.
-        if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
-        handler(text, file.name);
-      };
+      reader.onload = () => handler(decodeText(reader.result), file.name);
       reader.readAsArrayBuffer(file);
     });
     document.body.appendChild(input);
     input.click();
   }
 
+  function decodeText(buffer) {
+    const buf = new Uint8Array(buffer);
+    const text = new TextDecoder('utf-8').decode(buf);
+    // Planilhas salvas pelo Excel no Windows costumam vir em Windows-1252.
+    return text.includes('\uFFFD') ? new TextDecoder('windows-1252').decode(buf) : text;
+  }
+
+  /** Planilha em Excel (.xlsx) ou CSV. */
+  function pickSpreadsheet() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.csv,.txt,.tsv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => (P.xlsx.isXlsx(reader.result) ? importXlsx(reader.result, file.name) : importCSV(decodeText(reader.result)));
+      reader.readAsArrayBuffer(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async function importXlsx(buffer, fileName) {
+    let sheets;
+    try {
+      sheets = await P.xlsx.read(buffer);
+    } catch (e) {
+      return openModal({ title: 'Não foi possível abrir a planilha', body: '<p>' + esc(e.message || e) + '</p>' });
+    }
+    for (const sh of sheets) {
+      const blocks = P.blocks.parse(sh.rows);
+      if (blocks.length) return openBlocksPreview(blocks, fileName);
+    }
+    // Sem blocos por data: tenta os formatos de CSV na primeira aba com dados.
+    const sheet = sheets.find((sh) => sh.rows.some((r) => r && r.some((v) => v !== null))) || sheets[0];
+    importCSV(P.xlsx.toCSV(sheet.rows));
+  }
+
+  /** Prévia da planilha de evolução patrimonial (um bloco por fechamento). */
+  function openBlocksPreview(blocks, fileName) {
+    const plan = P.blocks.plan(store, blocks);
+    const last = blocks[blocks.length - 1];
+    const lastTotal = last.items.reduce((acc, it) => acc + it.value, 0);
+    const bad = plan.checks.filter((c) => !c.ok);
+    const banks = new Set(plan.assets.map((a) => U.norm(a.bank)));
+    const hasData = store.data.assets.length > 0;
+    const classSelect = (a, i) =>
+      '<select data-bl-class="' + i + '" style="width:150px">' + P.ASSET_CLASSES.map((c) => '<option value="' + c.id + '"' + (c.id === a.classId ? ' selected' : '') + '>' + esc(c.title) + '</option>').join('') + '</select>';
+    const item = (v, l) => '<div class="item"><div class="v">' + v + '</div><div class="l">' + esc(l) + '</div></div>';
+    const assets = plan.assets
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => (y.a.lastValue > 0) - (x.a.lastValue > 0) || U.norm(x.a.bank).localeCompare(U.norm(y.a.bank)) || y.a.lastValue - x.a.lastValue);
+    const body =
+      '<p class="muted">Encontrei <strong>' + blocks.length + ' fechamentos</strong> em <em>' + esc(fileName || 'planilha') + '</em>. Cada investimento vira um ativo com o histórico de saldos. Quem some da planilha fica com saldo zero e é arquivado.</p>' +
+      '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
+      item(U.fmtDate(blocks[0].date) + ' a ' + U.fmtDate(last.date), 'Período') +
+      item(String(plan.assets.length), 'Investimentos em ' + banks.size + ' instituições') +
+      item(money(lastTotal), 'Patrimônio em ' + U.fmtDate(last.date)) +
+      item(bad.length ? '<span class="neg">' + bad.length + ' divergem</span>' : '<span class="pos">Todos conferem</span>', 'Soma × linha TOTAL') +
+      '</div>' +
+      (bad.length ? '<p class="neg" style="font-size:13px">A soma dos itens não bate com o TOTAL em: ' + bad.map((c) => U.fmtDate(c.date) + ' (' + money(c.sum) + ' × ' + money(c.total) + ')').join(', ') + '.</p>' : '') +
+      '<label class="check" style="margin:4px 0 2px"><input type="checkbox" id="bl-estimate" checked> Estimar aportes e resgates</label>' +
+      '<p class="faint" style="margin:0 0 12px">A planilha só tem saldos. Para a rentabilidade não contar dinheiro novo como ganho, o app estima as entradas e saídas: em conta corrente toda variação é entrada/saída; em renda fixa, Tesouro e poupança, o que passa do rendimento normal vira aporte ou resgate; em ações, a variação é rendimento. Posições novas contam como aporte e posições zeradas como resgate. Você pode conferir e apagar esses lançamentos no detalhe de cada investimento.</p>' +
+      (hasData ? '<p class="muted" style="font-size:13px">Você já tem investimentos cadastrados. Os que tiverem o mesmo nome e instituição recebem o histórico; saldos na mesma data são substituídos.</p>' : '') +
+      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th>Investimento</th><th>Classe</th><th>Período</th><th style="text-align:right">Último saldo</th></tr></thead><tbody>' +
+      assets
+        .map(({ a, i }) => {
+          const end = a.closedAt !== null ? blocks[a.closedAt].date : last.date;
+          return (
+            '<tr class="' + (a.lastValue > 0 ? '' : 'off') + '"><td><div style="font-weight:550">' + esc(a.name) +
+            (a.lastValue > 0 ? '' : ' <span class="tag">encerrado</span>') + (a.exists ? ' <span class="tag">já cadastrado</span>' : '') +
+            '</div><div class="faint">' + esc(P.institutionAlias(a.bank)) + '</div></td>' +
+            '<td>' + classSelect(a, i) + '</td>' +
+            '<td class="num faint" style="white-space:nowrap">' + U.fmtMonth(U.monthKey(blocks[a.first].date)) + ' – ' + U.fmtMonth(U.monthKey(end)) + '</td>' +
+            '<td class="num" style="text-align:right;white-space:nowrap">' + money(a.lastValue) + '</td></tr>'
+          );
+        })
+        .join('') +
+      '</tbody></table></div>';
+    openModal({
+      title: 'Importar evolução patrimonial',
+      wide: true,
+      body,
+      actions: [
+        { label: 'Cancelar' },
+        {
+          label: 'Importar ' + plan.assets.length + ' investimentos',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            $$('[data-bl-class]', form).forEach((el) => (plan.assets[el.dataset.blClass].classId = el.value));
+            const summary = P.blocks.apply(store, plan, { estimateFlows: $('#bl-estimate', form).checked });
+            close();
+            state.showArchived = false;
+            go('dashboard');
+            openModal({
+              title: 'Planilha importada',
+              body: '<p>' + esc(P.csv.describe(summary)) + '</p><p class="muted">Daqui em diante, use a tela <strong>Atualizar</strong> no fim de cada mês para lançar os saldos (e, se quiser, os aportes e resgates) de todos os investimentos de uma vez.</p>',
+              actions: [{ label: 'Ver carteira', onClick: (c) => (c(), go('portfolio')) }, { label: 'OK', cls: 'primary' }],
+            });
+          },
+        },
+      ],
+    });
+  }
+
   function importCSV(text) {
     const rows = P.csv.parse(text);
     if (rows.length && P.statement.isStatement(rows[0])) return openStatementPreview(text);
+    const blocks = P.blocks.parse(rows);
+    if (blocks.length) return openBlocksPreview(blocks);
     try {
       const summary = P.csv.importInto(store, text);
       openModal({ title: 'Importação concluída', body: '<p>' + esc(P.csv.describe(summary)) + '</p>', actions: [{ label: 'Ver carteira', cls: 'primary', onClick: (close) => (close(), go('portfolio')) }] });
@@ -3476,7 +4079,9 @@
       title: 'Como preparar sua planilha',
       wide: true,
       body:
-        '<p>No Excel use <strong>Arquivo › Salvar como › CSV</strong>. No Google Planilhas, <strong>Arquivo › Fazer download › CSV</strong>.</p>' +
+        '<p>Importe o arquivo do Excel (.xlsx) direto, ou um CSV. No Google Planilhas: <strong>Arquivo › Fazer download › Microsoft Excel (.xlsx)</strong>. Fórmulas entram com o valor calculado.</p>' +
+        '<h3 class="card-title" style="margin-top:14px">Evolução patrimonial em blocos</h3><p class="muted">Um bloco por fechamento, lado a lado: a data em cima e as colunas <strong>Investimento</strong>, <strong>Banco</strong> e <strong>Valor</strong> (colunas extras como % e Rendimento são ignoradas). O bloco termina na linha TOTAL, que serve para conferir a soma. Tabelas auxiliares com outros cabeçalhos ficam de fora. Antes de gravar, o app mostra uma prévia onde você ajusta a classe de cada investimento.</p>' +
+        '<pre class="code">' + esc(P.csv.TEMPLATE_BLOCKS) + '</pre>' +
         '<h3 class="card-title" style="margin-top:14px">Formato 1 — saldos por mês</h3><p class="muted">Uma linha por investimento e uma coluna por mês. É o formato mais comum de planilha de patrimônio. O primeiro saldo de cada investimento é considerado aporte inicial.</p>' +
         '<pre class="code">' + esc(P.csv.TEMPLATE_MONTHS) + '</pre><button class="btn small" data-action="download-template" data-id="meses">Baixar modelo</button>' +
         '<h3 class="card-title" style="margin-top:18px">Formato 2 — lançamentos</h3><p class="muted">Uma linha por data e investimento, com aportes, resgates e proventos, para uma rentabilidade exata.</p>' +
