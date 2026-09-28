@@ -11,9 +11,13 @@ struct CashFlowView: View {
     @State private var month = Date().startOfMonth
     @State private var editing: CashTransaction?
     @State private var newIsIncome: Bool?
-    @State private var showStatementPicker = false
+    @State private var pickerKind: PickerKind = .statement
+    @State private var showPicker = false
     @State private var statementFile: StatementFile?
+    @State private var invoiceFile: InvoiceFile?
     @State private var message: String?
+
+    enum PickerKind { case statement, invoice }
 
     private var monthTransactions: [CashTransaction] {
         transactions.filter { $0.date.isSameMonth(as: month) }
@@ -88,17 +92,28 @@ struct CashFlowView: View {
                         Button { newIsIncome = false } label: { Label("Nova despesa", systemImage: "minus.circle") }
                         Button { newIsIncome = true } label: { Label("Nova receita", systemImage: "plus.circle") }
                         Divider()
-                        Button { showStatementPicker = true } label: { Label("Importar extrato (CSV)", systemImage: "doc.text.magnifyingglass") }
+                        Button { pickerKind = .statement; showPicker = true } label: { Label("Importar extrato (CSV)", systemImage: "doc.text.magnifyingglass") }
+                        Button { pickerKind = .invoice; showPicker = true } label: { Label("Importar fatura do cartão (PDF)", systemImage: "creditcard") }
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
             }
             .sheet(item: $editing) { TransactionFormView(transaction: $0, isIncome: $0.isIncome) }
-            .fileImporter(isPresented: $showStatementPicker, allowedContentTypes: [.commaSeparatedText, .plainText, .text]) { result in
-                switch readPickedFile(result.map { [$0] }) {
-                case .success(let text): statementFile = StatementFile(text: text)
-                case .failure(let error): message = error.localizedDescription
+            .fileImporter(
+                isPresented: $showPicker,
+                allowedContentTypes: pickerKind == .invoice ? [.pdf] : [.commaSeparatedText, .plainText, .text]
+            ) { result in
+                if pickerKind == .invoice {
+                    switch readPickedData(result.map { [$0] }) {
+                    case .success(let data): invoiceFile = InvoiceFile(data: data)
+                    case .failure(let error): message = error.localizedDescription
+                    }
+                } else {
+                    switch readPickedFile(result.map { [$0] }) {
+                    case .success(let text): statementFile = StatementFile(text: text)
+                    case .failure(let error): message = error.localizedDescription
+                    }
                 }
             }
             .sheet(item: $statementFile) { file in
@@ -107,7 +122,13 @@ struct CashFlowView: View {
                     message = "\(added) lançamento(s) importado(s)."
                 }
             }
-            .alert("Extrato", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+            .sheet(item: $invoiceFile) { file in
+                InvoiceImportView(data: file.data) { text, last in
+                    if let last { month = last.startOfMonth }
+                    message = text
+                }
+            }
+            .alert("Importação", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(message ?? "")

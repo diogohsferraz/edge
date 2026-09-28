@@ -24,6 +24,19 @@ func readPickedFile(_ result: Result<[URL], Error>) -> Result<String, Error> {
     }
 }
 
+/// Lê um arquivo binário (PDF) escolhido no seletor de arquivos.
+func readPickedData(_ result: Result<[URL], Error>) -> Result<Data, Error> {
+    switch result {
+    case .failure(let error):
+        return .failure(error)
+    case .success(let urls):
+        guard let url = urls.first else { return .failure(CocoaError(.fileNoSuchFile)) }
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        return Result { try Data(contentsOf: url) }
+    }
+}
+
 /// Prévia do extrato: o usuário confere as categorias antes de importar.
 struct StatementImportView: View {
     let text: String
@@ -128,6 +141,7 @@ private struct StatementRowView: View {
                         if row.isInvestment { tag("investimento") }
                         if row.isDuplicate { tag("já importado") }
                         if row.isRemembered { tag("lembrado") }
+                        if row.isCardPayment { tag("fatura detalhada") }
                     }
                     if !row.details.isEmpty {
                         Text(row.details).font(.caption).foregroundStyle(.secondary).lineLimit(1)

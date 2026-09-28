@@ -37,6 +37,14 @@ Receitas e despesas por categoria, resumo mensal, gráfico dos gastos por catego
 
 **Importar extrato (CSV)**, no menu **+** do Orçamento ou em Ajustes, testado com o extrato de conta corrente do **Banco do Brasil**. As linhas de saldo são ignoradas e as movimentações de investimento (BB Rende Fácil, poupança, Tesouro) vêm desmarcadas. A categoria é sugerida pela descrição, e o app lembra a categoria que você escolher para cada favorecido. Importar o mesmo extrato de novo não duplica os lançamentos.
 
+**Importar fatura do cartão (PDF)**, no menu **+** do Orçamento, testado com a fatura **Ourocard (BB)**:
+- as compras são distribuídas nas categorias de despesa, pela seção da fatura ou pela descrição;
+- parcelas entram no mês da fatura;
+- estornos que anulam uma cobrança vêm desmarcados;
+- o total selecionado é conferido com o total da fatura.
+
+Para não contar o mesmo gasto duas vezes, o pagamento da fatura ("Pagto cartão crédito" no extrato) passa a ser tratado como transferência. A prévia oferece remover os pagamentos já lançados que batem com o valor da fatura, e os próximos extratos trazem essa linha desmarcada.
+
 ### Ajustes
 - **Importar planilha (CSV)** do Excel ou Google Planilhas, em dois formatos:
   - *Saldos por mês* (colunas `01/2026; 02/2026; …`), que é o formato mais comum de planilha de patrimônio;

@@ -271,3 +271,146 @@ final class StatementImporterTests: XCTestCase {
         XCTAssertFalse(prepared.contains(where: \.include))
     }
 }
+
+
+final class InvoiceImporterTests: XCTestCase {
+    /// Texto da fatura fictícia (mesmo layout da fatura Ourocard do BB).
+    static let sampleText = """
+    Olá, Fulano, esta é sua fatura de OUROCARD VISA EXEMPLO Final 1234
+    Resumo da fatura
+    Vencimento Saldo fatura anterior R$ 1.500,00
+    outubro
+    05/10/2026 Pagamentos/Créditos R$ -1.525,00
+    Compras nacionais R$ 1.396,00
+    Total R$ 1.371,00
+    Datas fatura
+    Fatura fechada em 23/09/2026
+    Fechamento da próxima fatura 26/10/2026 Valor original R$ 0,00
+    Lançamentos nesta fatura
+    Fulano de Tal (Cartão 1234)
+    Data Descrição País Valor
+    SALDO FATURA ANTERIOR BR R$ 1.500,00
+    Pagamentos/Créditos
+    08/09 PGTO DEBITO CONTA 1111 000001234 200 BR R$ -1.500,00
+    22/09 DESC AUTOMATICO ANUD. TIT-PARC 12/12 BR R$ -25,00
+    Restaurantes
+    26/08 PADARIA EXEMPLO MACEIO BR R$ 14,00
+    02/09 LANCHONETE EXEMPLO MACEIO BR R$ 7,00
+    02/09 LANCHONETE EXEMPLO MACEIO BR R$ 7,00
+    10/09 IFD*RESTAURANTE EXEMPLO MACEIO BR R$ 105,00
+    Saúde
+    09/09 DROGASIL 0000 MACEIO BR R$ 42,00
+    Serviços
+    09/09 ASSAI ATACADISTA LJ00 MACEIO BR R$ 593,97
+    02/09 EBN*SPOTIFY CURITIBA BR R$ 40,90
+    05/09 POSTO EXEMPLO MACEIO BR R$ 9,99
+    13/09 LOJA DESCONHECIDA MACEIO BR R$ 15,00
+    Supermercados
+    07/09 UNICOMPRA MACEIO BR R$ 142,23
+    Outros lançamentos
+    22/09 ANUIDADE DIFERENCIADA TIT-PARC 12/12 BR R$ 25,00
+    Compras parceladas
+    22/04 CLARO EXEMPLO PARC 17/21 MACEIO BR R$ 237,57
+    28/11 HOTEL EXEMPLO PARC 10/10 GRAVATA BR R$ 100,00
+    15/09 LEROY MERLIN PARC 01/06 MACEIO BR R$ 56,34
+    Página 1/2
+    Total da Fatura R$ 1.371,00
+    """
+
+    override func tearDown() {
+        StatementImporter.cardItemized = false
+        super.tearDown()
+    }
+
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        Calendar.app.date(from: DateComponents(year: y, month: m, day: d, hour: 12))!
+    }
+
+    private func check(_ parsed: InvoiceImporter.Parsed, file: StaticString = #filePath, line: UInt = #line) {
+        let info = parsed.info
+        XCTAssertEqual(info.card, "1234", file: file, line: line)
+        XCTAssertEqual(info.closing, date(2026, 9, 23), file: file, line: line)
+        XCTAssertEqual(info.due, date(2026, 10, 5), file: file, line: line)
+        XCTAssertEqual(info.total ?? 0, 1371, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(info.previous ?? 0, 1500, accuracy: 0.001, file: file, line: line)
+        // O total selecionado confere com o total da fatura.
+        XCTAssertEqual(parsed.selectedNet, 1371, accuracy: 0.001, file: file, line: line)
+
+        func row(_ prefix: String) -> InvoiceImporter.Row? { parsed.rows.first { $0.title.hasPrefix(prefix) } }
+        XCTAssertEqual(row("PADARIA")?.category, .alimentacao, file: file, line: line)
+        XCTAssertEqual(row("ASSAI")?.category, .mercado, file: file, line: line)
+        XCTAssertEqual(row("EBN*SPOTIFY")?.category, .assinaturas, file: file, line: line)
+        XCTAssertEqual(row("POSTO")?.category, .transporte, file: file, line: line)
+        XCTAssertEqual(row("LOJA DESCONHECIDA")?.category, .outrosGastos, file: file, line: line)
+        XCTAssertEqual(row("UNICOMPRA")?.category, .mercado, file: file, line: line)
+
+        let payment = parsed.rows.first { $0.kind == .payment }
+        XCTAssertEqual(payment?.amount ?? 0, 1500, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(payment?.include, false, file: file, line: line)
+        XCTAssertEqual(row("ANUIDADE")?.include, false, file: file, line: line)
+        XCTAssertEqual(row("DESC AUTOMATICO")?.include, false, file: file, line: line)
+
+        let claro = row("CLARO")
+        XCTAssertEqual(claro?.installment, InvoiceImporter.Installment(number: 17, total: 21), file: file, line: line)
+        XCTAssertEqual(claro?.date, date(2026, 9, 23), file: file, line: line)
+        XCTAssertEqual(claro?.purchaseDate, date(2026, 4, 22), file: file, line: line)
+        XCTAssertEqual(claro?.category, .contas, file: file, line: line)
+        XCTAssertEqual(row("HOTEL")?.purchaseDate, date(2025, 11, 28), file: file, line: line)
+        XCTAssertEqual(row("LEROY")?.date, date(2026, 9, 15), file: file, line: line)
+        XCTAssertEqual(parsed.rows.filter { $0.title.hasPrefix("LANCHONETE") }.count, 2, file: file, line: line)
+        XCTAssertEqual(Set(parsed.rows.map(\.ref)).count, parsed.rows.count, file: file, line: line)
+    }
+
+    func testParsesInvoiceText() throws {
+        check(try InvoiceImporter.parse(text: Self.sampleText))
+    }
+
+    func testReadsInvoicePDFWithPDFKit() throws {
+        let bundle = Bundle(for: Self.self)
+        let url = try XCTUnwrap(
+            bundle.url(forResource: "fatura-bb-exemplo", withExtension: "pdf")
+                ?? bundle.url(forResource: "fatura-bb-exemplo", withExtension: "pdf", subdirectory: "Fixtures")
+        )
+        let text = try InvoiceImporter.extractText(from: try Data(contentsOf: url))
+        check(try InvoiceImporter.parse(text: text))
+    }
+
+    @MainActor
+    func testRemovesCardPaymentAndAvoidsDuplicates() throws {
+        let container = try ModelContainer(
+            for: Institution.self, Asset.self, BalanceSnapshot.self, Movement.self, CashTransaction.self,
+            configurations: ModelConfiguration(UUID().uuidString, isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        // "Pagto cartão crédito" que veio do extrato da conta.
+        let payment = CashTransaction(date: date(2026, 9, 8), amount: 1500, category: .cartao, note: "Pagto cartão crédito", ref: "extrato:x")
+        let other = CashTransaction(date: date(2026, 6, 8), amount: 999, category: .cartao, note: "Pagto cartão crédito", ref: "extrato:y")
+        context.insert(payment)
+        context.insert(other)
+
+        let parsed = try InvoiceImporter.parse(text: Self.sampleText)
+        let all = try context.fetch(FetchDescriptor<CashTransaction>())
+        let choices = InvoiceImporter.cardPayments(in: all, for: parsed)
+        XCTAssertEqual(choices.count, 2)
+        XCTAssertEqual(choices.first { $0.transaction.ref == "extrato:x" }?.suggested, true)
+        XCTAssertEqual(choices.first { $0.transaction.ref == "extrato:y" }?.suggested, false)
+
+        let result = InvoiceImporter.importRows(parsed.rows, removing: [payment], into: context)
+        XCTAssertEqual(result.removed, 1)
+        XCTAssertEqual(result.added, parsed.rows.filter(\.include).count)
+        XCTAssertTrue(StatementImporter.cardItemized)
+        let remaining = try context.fetch(FetchDescriptor<CashTransaction>())
+        XCTAssertFalse(remaining.contains { $0.ref == "extrato:x" })
+        let expenses = remaining.filter { !$0.isIncome && $0.ref.hasPrefix("fatura:") }.reduce(0) { $0 + $1.amount }
+        XCTAssertEqual(expenses, 1371, accuracy: 0.001)
+
+        XCTAssertEqual(InvoiceImporter.importRows(parsed.rows, removing: [], into: context).added, 0)
+
+        // Próximo extrato: o pagamento da fatura vem desmarcado.
+        let statement = try StatementImporter.parse(StatementImporterTests.sample)
+        let prepared = StatementImporter.prepare(statement.rows, rules: [:], existingRefs: [])
+        let card = try XCTUnwrap(prepared.first { $0.category == .cartao })
+        XCTAssertFalse(card.include)
+        XCTAssertTrue(card.isCardPayment)
+    }
+}

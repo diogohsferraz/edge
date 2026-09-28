@@ -19,6 +19,14 @@ enum StatementImporter {
         var include: Bool
         var isDuplicate = false
         var isRemembered = false
+        /// Pagamento de fatura desmarcado porque as faturas do cartão são importadas detalhadas.
+        var isCardPayment = false
+    }
+
+    /// Depois de importar uma fatura detalhada, o pagamento da fatura na conta vira transferência.
+    static var cardItemized: Bool {
+        get { UserDefaults.standard.bool(forKey: "statement.cardItemized") }
+        set { UserDefaults.standard.set(newValue, forKey: "statement.cardItemized") }
     }
 
     struct Parsed {
@@ -74,17 +82,17 @@ enum StatementImporter {
 
     private static let expenseRules: [(CashCategory, [String])] = [
         (.cartao, ["cartao credito", "cartao de credito", "pagto cartao", "fatura"]),
-        (.impostos, ["imposto", "darf", "iptu", "ipva", "tributo", "receita federal", "taxa"]),
-        (.moradia, ["edificio", "condominio", "aluguel", "residencial", "imobiliaria", "res "]),
+        (.impostos, ["imposto", "darf", "iptu", "ipva", "tributo", "receita federal", "taxa", "anuidade", "anud", "tarifa", "iof ", "encargo"]),
+        (.moradia, ["edificio", "condominio", "aluguel", "residencial", "imobiliaria", "res ", "leroy", "madebras", "home ", "moveis", "decor", "construc"]),
         (.contas, ["energia", "equatorial", "neoenergia", "enel", "cemig", "light", "agua", "casal", "sabesp", "internet", "claro", "vivo", "tim ", "oi ", "net ", "gas "]),
         (.transporte, ["posto", "combust", "shell", "ipiranga", "uber", "99 ", "99app", "estacion", "pedagio", "sem parar", "detran"]),
-        (.compras, ["magazine", "americanas", "shopee", "mercadolivre", "mercado livre", "amazon", "shein", "renner", "riachuelo"]),
-        (.mercado, ["supermerc", "mercado", "atacad", "assai", "carrefour", "hortifruti", "padaria", "extra ", "pao de acucar"]),
+        (.compras, ["magazine", "americanas", "shopee", "mercadolivre", "mercadoliv", "mercado livre", "amazon", "shein", "renner", "riachuelo", "marisa", "netshoes", "cellshop"]),
+        (.mercado, ["supermerc", "mercado", "atacad", "assai", "carrefour", "hortifruti", "padaria", "extra ", "pao de acucar", "sams club", "acougue", "unicompra"]),
         (.alimentacao, ["restaurante", "ifood", "lanche", "burger", "pizza", "bar ", "cafe"]),
-        (.saude, ["farmacia", "drogaria", "drogasil", "pague menos", "hospital", "clinica", "laborat", "unimed", "hapvida", "smartfit", "academia", "odonto", "medic"]),
-        (.educacao, ["escola", "colegio", "faculdade", "curso", "livraria", "udemy"]),
+        (.saude, ["farmacia", "drogaria", "drogasil", "pague menos", "hospital", "clinica", "laborat", "unilab", "unimed", "hapvida", "smartfit", "academia", "odonto", "medic"]),
+        (.educacao, ["escola", "colegio", "coleg", "faculdade", "curso", "livraria", "udemy"]),
         (.assinaturas, ["netflix", "spotify", "amazon prime", "disney", "youtube", "apple.com", "google", "hbo", "globoplay"]),
-        (.viagem, ["hotel", "airbnb", "latam", "gol ", "azul ", "booking", "decolar"]),
+        (.viagem, ["hotel", "hot ", "pousada", "airbnb", "latam", "gol ", "azul ", "booking", "decolar", "smiles", "localiza", "movida", "rent ", "turism"]),
         (.pets, ["pet", "veterin", "cobasi", "petz"]),
         (.lazer, ["cinema", "ingresso", "show", "teatro", "steam", "playstation"]),
     ]
@@ -173,7 +181,11 @@ enum StatementImporter {
     private static let rulesKey = "statement.categoryRules"
 
     static func ruleKey(for row: Row) -> String {
-        (row.details.isEmpty ? row.title : row.details).normalizedKey
+        ruleKey(title: row.title, details: row.details)
+    }
+
+    static func ruleKey(title: String, details: String) -> String {
+        (details.isEmpty ? title : details).normalizedKey
             .replacingOccurrences(of: #"[0-9./-]{6,}"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
@@ -196,6 +208,10 @@ enum StatementImporter {
             }
             if existingRefs.contains(r.ref) {
                 r.isDuplicate = true
+                r.include = false
+            }
+            if cardItemized && !r.isIncome && r.category == .cartao {
+                r.isCardPayment = true
                 r.include = false
             }
             return r
