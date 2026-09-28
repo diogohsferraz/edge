@@ -37,11 +37,21 @@ jobs:
           echo "id=$ID" >> "$GITHUB_OUTPUT"
       - name: Build and test
         run: |
-          set -o pipefail
-          xcodebuild test \
+          if ! xcodebuild test \
             -project Patrimonio.xcodeproj \
             -scheme Patrimonio \
             -destination "id=${{ steps.sim.outputs.id }}" \
-            CODE_SIGNING_ALLOWED=NO \
-            | tee xcodebuild.log | grep -E "error:|warning: .*(deprecated|unused)|Test Case|Executed|BUILD|TEST" || true
-          test ${PIPESTATUS[0]} -eq 0
+            CODE_SIGNING_ALLOWED=NO > xcodebuild.log 2>&1; then
+            echo "::group::Errors"
+            grep -E "error:|failed|Failing tests" xcodebuild.log | sort -u | head -100
+            echo "::endgroup::"
+            tail -80 xcodebuild.log
+            exit 1
+          fi
+          grep -E "Test Case .*(passed|failed)|Executed|\*\* TEST" xcodebuild.log
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: PatrimonioApp/xcodebuild.log
