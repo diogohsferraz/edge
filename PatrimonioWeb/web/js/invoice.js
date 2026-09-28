@@ -92,14 +92,33 @@
   };
 
   /** Uma compra "dd/mm" recebe o ano pela data de fechamento da fatura. */
-  function inferYear(ddmm, closingISO) {
+  /**
+   * A fatura traz só "dd/mm". O ano vem da data de fechamento; numa parcela n,
+   * a compra foi feita cerca de n−1 meses antes (ex.: 17/21 em set/2026 → compra em 2025).
+   */
+  function inferYear(ddmm, closingISO, installmentNumber) {
     const [d, m] = ddmm.split('/').map(Number);
     const cy = Number(closingISO.slice(0, 4));
     const cm = Number(closingISO.slice(5, 7));
-    const y = m > cm ? cy - 1 : cy;
+    const back = installmentNumber && installmentNumber > 1 ? installmentNumber - 1 : 0;
+    let y = m > cm ? cy - 1 : cy;
+    if (back) {
+      // Escolhe o ano que deixa a compra mais perto de "fechamento − (n−1) meses".
+      const target = cy * 12 + (cm - 1) - back;
+      let best = y;
+      for (let cand = cy - 4; cand <= cy; cand++) {
+        if (Math.abs(cand * 12 + (m - 1) - target) < Math.abs(best * 12 + (m - 1) - target)) best = cand;
+      }
+      y = best;
+    }
     const mk = y + '-' + String(m).padStart(2, '0');
     return mk + '-' + String(Math.min(d, U.daysInMonth(mk))).padStart(2, '0');
   }
+
+  /** Identifica a mesma compra parcelada em faturas diferentes. */
+  I.installmentGroup = function (card, purchaseDate, desc, total) {
+    return ['parc', card || '', purchaseDate, U.norm(desc), total].join(':');
+  };
 
   function sectionIn(gapText) {
     const t = U.norm(gapText);
@@ -165,8 +184,8 @@
       if (amountSigned === null || amountSigned === 0) continue;
       const parc = rawDesc.match(/PARC(\d{1,2})de(\d{1,2})/i);
       const desc = rawDesc.replace(/\s*(TIT-)?PARC\d{1,2}de\d{1,2}/i, '').replace(/\s*\|\s*/g, ' ').trim();
-      const purchaseDate = inferYear(m[1], info.closing);
       const installment = parc ? { n: Number(parc[1]), total: Number(parc[2]) } : null;
+      const purchaseDate = inferYear(m[1], info.closing, installment ? installment.n : 0);
       // Parcelas a partir da 2ª pertencem ao mês desta fatura, não ao mês da compra.
       const date = installment && installment.n > 1 ? info.closing : purchaseDate;
       const isPaymentSection = section && section.cat === '__payments';
@@ -191,6 +210,8 @@
         income: kind !== 'purchase',
         kind,
         installment,
+        // Só compras com mais de uma parcela formam um grupo.
+        group: installment && installment.total > 1 && kind === 'purchase' ? I.installmentGroup(info.card, purchaseDate, desc, installment.total) : null,
         category,
         suggested: category,
         investment: false,
@@ -244,6 +265,23 @@
     if (remove.size) store.data.transactions = store.data.transactions.filter((t) => !remove.has(t.id));
     store.data.settings.cardItemized = true;
     const res = P.statement.importRows(store, rows.map((r) => Object.assign({}, r, { investment: false })));
-    return Object.assign(res, { removed: remove.size });
+    // Categoria escolhida vale para todas as parcelas da mesma compra (já lançadas e futuras).
+    let updated = 0;
+    rows.forEach((r) => {
+      if (r.include && r.group) updated += store.applyCategoryToGroup(r.group, r.category, false);
+    });
+    store.commit();
+    return Object.assign(res, { removed: remove.size, installmentsUpdated: updated });
+  };
+
+  /** Aplica as categorias já escolhidas para outras parcelas da mesma compra. */
+  I.applyInstallmentRules = function (store, rows) {
+    const rules = store.data.settings.installmentRules || {};
+    rows.forEach((r) => {
+      if (!r.group || !rules[r.group] || !P.categoryExists(rules[r.group])) return;
+      r.category = rules[r.group];
+      r.tags = (r.tags || []).concat('parcela lembrada');
+    });
+    return rows;
   };
 })(typeof window !== 'undefined' ? window : globalThis);

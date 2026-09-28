@@ -1,6 +1,6 @@
 # Patrimônio — versões Windows e Web (Google Apps Script)
 
-A mesma aplicação do app iOS (`../PatrimonioApp`), feita com HTML, CSS e JavaScript para rodar no **Windows** e no **navegador**. Uma única interface em `web/` gera as três versões:
+Aplicação de controle de finanças e investimentos feita com HTML, CSS e JavaScript para rodar no **Windows** e no **navegador**. Uma única interface em `web/` gera as três versões:
 
 | Versão | Onde roda | Onde ficam os dados | Pasta |
 |---|---|---|---|
@@ -34,6 +34,7 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
     - parcelas ("PARC 17/21") entram no mês da fatura;
     - estornos que anulam uma cobrança (ex.: anuidade + desconto) vêm desmarcados;
     - o total selecionado é conferido com o "Total da Fatura".
+    - **Compras parceladas:** a categoria escolhida para uma parcela vale para todas as parcelas da mesma compra, as já lançadas e as das próximas faturas.
     - **Sem duplicidade:** ao importar faturas, o pagamento da fatura ("Pagto cartão crédito" no extrato) deixa de ser despesa. A prévia oferece remover os pagamentos já lançados que batem com o valor da fatura, e os próximos extratos trazem essa linha desmarcada.
 - **Ajustes:**
   - Importar a planilha em **CSV**, no formato de colunas por mês ou de lançamentos.

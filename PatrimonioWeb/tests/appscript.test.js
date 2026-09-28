@@ -88,3 +88,12 @@ test('categorias personalizadas sobrevivem à planilha', () => {
   assert.equal(back.customCategories[0].parentId, 'moradia');
   assert.equal(back.transactions[0].category, 'c_1');
 });
+
+test('grupo de parcelas e regras de parcelas sobrevivem à planilha', () => {
+  const { ctx } = loadGas();
+  const d = { institutions: [], assets: [], snapshots: [], movements: [], transactions: [{ id: 't1', date: '2026-09-23', amount: 237.57, category: 'contas', income: false, note: 'Claro', group: 'parc:1234:2025-04-22:claro:21' }], settings: { installmentRules: { 'parc:1234:2025-04-22:claro:21': 'contas' } }, benchmarks: {} };
+  ctx.saveData(JSON.stringify(d));
+  const back = JSON.parse(ctx.getData());
+  assert.equal(back.transactions[0].group, 'parc:1234:2025-04-22:claro:21');
+  assert.equal(back.settings.installmentRules['parc:1234:2025-04-22:claro:21'], 'contas');
+});

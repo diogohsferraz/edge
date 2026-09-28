@@ -871,10 +871,11 @@ pre.code {
         const cat = P.categoryById(t.category);
         const out = { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
         if (t.ref) out.ref = str(t.ref);
+        if (t.group) out.group = str(t.group);
         return out;
       });
     const s = raw.settings || {};
-    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true' };
+    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true', installmentRules: s.installmentRules && typeof s.installmentRules === 'object' ? s.installmentRules : {} };
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
@@ -1097,9 +1098,28 @@ pre.code {
         data.customCategories = data.customCategories.filter((c) => !ids.has(c.id));
         const rules = data.settings.categoryRules || {};
         Object.keys(rules).forEach((k) => ids.has(rules[k]) && (rules[k] = target));
+        const irules = data.settings.installmentRules || {};
+        Object.keys(irules).forEach((k) => ids.has(irules[k]) && (irules[k] = target));
         P.setCustomCategories(data.customCategories);
         store.commit();
         return moved;
+      },
+      /** Aplica a categoria a todos os lançamentos (parcelas) do grupo e lembra para as próximas. */
+      applyCategoryToGroup(group, categoryId, autoCommit) {
+        if (!group) return 0;
+        const cat = P.categoryById(categoryId);
+        let changed = 0;
+        data.transactions.forEach((t) => {
+          if (t.group === group && t.category !== cat.id) {
+            t.category = cat.id;
+            t.income = cat.income;
+            changed++;
+          }
+        });
+        data.settings.installmentRules = data.settings.installmentRules || {};
+        data.settings.installmentRules[group] = cat.id;
+        if (autoCommit !== false) store.commit();
+        return changed;
       },
       categoryUsage(id) {
         return data.transactions.filter((t) => P.inCategory(t.category, id)).length;
@@ -1825,7 +1845,9 @@ pre.code {
       if (!r.include) return;
       if (existing.has(r.ref)) return duplicates++;
       const cat = P.categoryById(r.category);
-      store.data.transactions.push({ id: U.uid(), date: r.date, amount: r.amount, category: cat.id, income: cat.income, note: r.note, ref: r.ref });
+      const tx = { id: U.uid(), date: r.date, amount: r.amount, category: cat.id, income: cat.income, note: r.note, ref: r.ref };
+      if (r.group) tx.group = r.group;
+      store.data.transactions.push(tx);
       existing.add(r.ref);
       added++;
     });
@@ -1929,14 +1951,33 @@ pre.code {
   };
 
   /** Uma compra "dd/mm" recebe o ano pela data de fechamento da fatura. */
-  function inferYear(ddmm, closingISO) {
+  /**
+   * A fatura traz só "dd/mm". O ano vem da data de fechamento; numa parcela n,
+   * a compra foi feita cerca de n−1 meses antes (ex.: 17/21 em set/2026 → compra em 2025).
+   */
+  function inferYear(ddmm, closingISO, installmentNumber) {
     const [d, m] = ddmm.split('/').map(Number);
     const cy = Number(closingISO.slice(0, 4));
     const cm = Number(closingISO.slice(5, 7));
-    const y = m > cm ? cy - 1 : cy;
+    const back = installmentNumber && installmentNumber > 1 ? installmentNumber - 1 : 0;
+    let y = m > cm ? cy - 1 : cy;
+    if (back) {
+      // Escolhe o ano que deixa a compra mais perto de "fechamento − (n−1) meses".
+      const target = cy * 12 + (cm - 1) - back;
+      let best = y;
+      for (let cand = cy - 4; cand <= cy; cand++) {
+        if (Math.abs(cand * 12 + (m - 1) - target) < Math.abs(best * 12 + (m - 1) - target)) best = cand;
+      }
+      y = best;
+    }
     const mk = y + '-' + String(m).padStart(2, '0');
     return mk + '-' + String(Math.min(d, U.daysInMonth(mk))).padStart(2, '0');
   }
+
+  /** Identifica a mesma compra parcelada em faturas diferentes. */
+  I.installmentGroup = function (card, purchaseDate, desc, total) {
+    return ['parc', card || '', purchaseDate, U.norm(desc), total].join(':');
+  };
 
   function sectionIn(gapText) {
     const t = U.norm(gapText);
@@ -2002,8 +2043,8 @@ pre.code {
       if (amountSigned === null || amountSigned === 0) continue;
       const parc = rawDesc.match(/PARC(\d{1,2})de(\d{1,2})/i);
       const desc = rawDesc.replace(/\s*(TIT-)?PARC\d{1,2}de\d{1,2}/i, '').replace(/\s*\|\s*/g, ' ').trim();
-      const purchaseDate = inferYear(m[1], info.closing);
       const installment = parc ? { n: Number(parc[1]), total: Number(parc[2]) } : null;
+      const purchaseDate = inferYear(m[1], info.closing, installment ? installment.n : 0);
       // Parcelas a partir da 2ª pertencem ao mês desta fatura, não ao mês da compra.
       const date = installment && installment.n > 1 ? info.closing : purchaseDate;
       const isPaymentSection = section && section.cat === '__payments';
@@ -2028,6 +2069,8 @@ pre.code {
         income: kind !== 'purchase',
         kind,
         installment,
+        // Só compras com mais de uma parcela formam um grupo.
+        group: installment && installment.total > 1 && kind === 'purchase' ? I.installmentGroup(info.card, purchaseDate, desc, installment.total) : null,
         category,
         suggested: category,
         investment: false,
@@ -2081,7 +2124,24 @@ pre.code {
     if (remove.size) store.data.transactions = store.data.transactions.filter((t) => !remove.has(t.id));
     store.data.settings.cardItemized = true;
     const res = P.statement.importRows(store, rows.map((r) => Object.assign({}, r, { investment: false })));
-    return Object.assign(res, { removed: remove.size });
+    // Categoria escolhida vale para todas as parcelas da mesma compra (já lançadas e futuras).
+    let updated = 0;
+    rows.forEach((r) => {
+      if (r.include && r.group) updated += store.applyCategoryToGroup(r.group, r.category, false);
+    });
+    store.commit();
+    return Object.assign(res, { removed: remove.size, installmentsUpdated: updated });
+  };
+
+  /** Aplica as categorias já escolhidas para outras parcelas da mesma compra. */
+  I.applyInstallmentRules = function (store, rows) {
+    const rules = store.data.settings.installmentRules || {};
+    rows.forEach((r) => {
+      if (!r.group || !rules[r.group] || !P.categoryExists(rules[r.group])) return;
+      r.category = rules[r.group];
+      r.tags = (r.tags || []).concat('parcela lembrada');
+    });
+    return rows;
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -3645,6 +3705,29 @@ pre.code {
     $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
   }
 
+  /**
+   * Ao trocar a categoria de uma linha da prévia, aplica o mesmo às linhas "iguais":
+   * outras parcelas da mesma compra ou o mesmo estabelecimento/favorecido.
+   */
+  function bindCategoryPropagation(form, rows) {
+    const keyOf = (r) => r.group || (r.income ? 'in:' : 'out:') + U.norm(r.details || r.title);
+    $$('[data-st-cat]', form).forEach((el) =>
+      el.addEventListener('change', () => {
+        const r = rows[el.dataset.stCat];
+        r.category = el.value;
+        let n = 0;
+        $$('[data-st-cat]', form).forEach((other) => {
+          const o = rows[other.dataset.stCat];
+          if (other === el || o.income !== r.income || keyOf(o) !== keyOf(r) || o.duplicate) return;
+          other.value = el.value;
+          o.category = el.value;
+          n++;
+        });
+        if (n) toast('Categoria aplicada também a ' + n + ' lançamento(s) iguais' + (r.group ? ' (parcelas da mesma compra)' : '') + '.');
+      })
+    );
+  }
+
   function bindPreviewTotals(form, rows, extra) {
     const recalc = () => {
       let inc = 0, exp = 0;
@@ -3711,7 +3794,10 @@ pre.code {
           },
         },
       ],
-      onOpen: (form) => bindPreviewTotals(form, rows),
+      onOpen: (form) => {
+        bindPreviewTotals(form, rows);
+        bindCategoryPropagation(form, rows);
+      },
     });
   }
 
@@ -3752,6 +3838,7 @@ pre.code {
     }
     const { info, rows } = parsed;
     markKnown(rows);
+    P.invoice.applyInstallmentRules(store, rows);
     const payments = P.invoice.findCardPayments(store, parsed);
     const dups = rows.filter((r) => r.duplicate).length;
     const body =
@@ -3793,18 +3880,20 @@ pre.code {
             finishImport(
               close,
               rows,
-              res.added + ' lançamento(s) da fatura importado(s)' + (res.removed ? ', ' + res.removed + ' pagamento(s) de fatura removido(s)' : '') + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.'
+              res.added + ' lançamento(s) da fatura importado(s)' + (res.removed ? ', ' + res.removed + ' pagamento(s) de fatura removido(s)' : '') + (res.installmentsUpdated ? ', ' + res.installmentsUpdated + ' parcela(s) anterior(es) recategorizada(s)' : '') + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.'
             );
           },
         },
       ],
-      onOpen: (form) =>
+      onOpen: (form) => {
+        bindCategoryPropagation(form, rows);
         bindPreviewTotals(form, rows, (inc, exp) => {
           const sel = exp - inc;
           const el = $('#inv-sel', form);
           const ok = info.total !== null && Math.abs(sel - info.total) < 0.01;
           el.innerHTML = U.money(sel) + (info.total !== null ? (ok ? ' <span class="pos" title="Confere com o total da fatura">✓</span>' : ' <span class="neg" title="Diferente do total da fatura">≠</span>') : '');
-        }),
+        });
+      },
     });
   }
 
@@ -4240,8 +4329,14 @@ pre.code {
         const amount = U.parseNumber(val(form, 'amount'));
         if (!(amount > 0)) return form.elements.amount.focus();
         if (val(form, 'category') === '__new') return form.elements.category.focus();
-        store.saveTransaction({ id: tx ? tx.id : undefined, date: val(form, 'date') || U.today(), amount: Math.abs(amount), category: val(form, 'category'), note: val(form, 'note') });
+        const category = val(form, 'category');
+        const changedCategory = tx && tx.category !== category;
+        store.saveTransaction({ id: tx ? tx.id : undefined, date: val(form, 'date') || U.today(), amount: Math.abs(amount), category, note: val(form, 'note') });
         close();
+        if (changedCategory && tx.group) {
+          const n = store.applyCategoryToGroup(tx.group, category);
+          toast(n ? 'Categoria aplicada também a ' + n + ' outra(s) parcela(s) desta compra. As próximas faturas já virão assim.' : 'As próximas parcelas desta compra virão com esta categoria.');
+        }
       },
     });
     openModal({
@@ -4250,7 +4345,10 @@ pre.code {
         '<div class="field"><label>Tipo</label><div class="seg" id="tx-type"><button type="button" data-inc="0" class="' + (!income ? 'on' : '') + '">Despesa</button><button type="button" data-inc="1" class="' + (income ? 'on' : '') + '">Receita</button></div></div>' +
         '<div class="form-row">' + field('Valor (R$)', '<input class="money-input" inputmode="decimal" name="amount" placeholder="0,00" value="' + esc(tx ? U.editable(tx.amount) : '') + '">') + field('Data', '<input type="date" name="date" value="' + t.date + '">') + '</div>' +
         field('Categoria', '<select name="category">' + catOptions(income, t.category) + '</select>') +
-        field('Descrição', '<input type="text" name="note" value="' + esc(t.note) + '">'),
+        field('Descrição', '<input type="text" name="note" value="' + esc(t.note) + '">') +
+        (tx && tx.group
+          ? '<p class="faint">Compra parcelada: ' + store.data.transactions.filter((x) => x.group === tx.group).length + ' parcela(s) lançada(s). Ao trocar a categoria, todas as parcelas desta compra (e as próximas) acompanham.</p>'
+          : ''),
       actions,
       onOpen: (form) => {
         $$('#tx-type button', form).forEach((b) =>

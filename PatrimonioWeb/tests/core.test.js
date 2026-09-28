@@ -241,7 +241,7 @@ test('lê a fatura do cartão (Ourocard BB) e distribui nas categorias', () => {
   const claro = by('CLARO');
   assert.deepEqual({ ...claro.installment }, { n: 17, total: 21 });
   assert.equal(claro.date, '2026-09-23');
-  assert.equal(claro.purchaseDate, '2026-04-22');
+  assert.equal(claro.purchaseDate, '2025-04-22'); // 17ª parcela em set/2026: compra em 2025
   assert.equal(claro.category, 'contas');
   assert.equal(by('HOTEL').purchaseDate, '2025-11-28');
   assert.equal(by('LEROY').date, '2026-09-15');
@@ -314,4 +314,49 @@ test('categorias e subcategorias personalizadas', () => {
   assert.equal(store.data.transactions.find((t) => t.note === 'Material').category, 'educacao');
   assert.ok(!P.categoryExists(escola.id));
   assert.equal(store.data.customCategories.length, 1);
+});
+
+test('categoria de compra parcelada vale para todas as parcelas', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'fatura-bb-exemplo.txt'), 'utf8');
+  // Fatura seguinte: fechamento em outubro e a 18ª parcela da mesma compra.
+  const next = text
+    .replace('Fatura fechada em 23/09/2026', 'Fatura fechada em 23/10/2026')
+    .replace('05/10/2026', '05/11/2026')
+    .replace('CLARO EXEMPLO PARC 17/21', 'CLARO EXEMPLO PARC 18/21')
+    .replace('LEROY MERLIN PARC 01/06', 'LEROY MERLIN PARC 02/06');
+  const store = P.createStore(memoryBackend());
+
+  const sep = P.invoice.parseText(text);
+  const claroSep = sep.rows.find((r) => r.title.startsWith('CLARO'));
+  const leroySep = sep.rows.find((r) => r.title.startsWith('LEROY'));
+  assert.ok(claroSep.group && leroySep.group);
+  assert.equal(sep.rows.find((r) => r.title.startsWith('PADARIA')).group, null); // compra à vista não tem grupo
+  claroSep.category = 'assinaturas'; // usuário muda a categoria da parcela
+  P.invoice.importRows(store, sep.rows, []);
+
+  const oct = P.invoice.parseText(next);
+  const claroOct = oct.rows.find((r) => r.title.startsWith('CLARO'));
+  const leroyOct = oct.rows.find((r) => r.title.startsWith('LEROY'));
+  assert.equal(claroOct.group, claroSep.group); // mesma compra reconhecida na fatura seguinte
+  assert.equal(leroyOct.group, leroySep.group);
+  assert.equal(leroyOct.purchaseDate, '2026-09-15');
+  P.invoice.applyInstallmentRules(store, oct.rows);
+  assert.equal(claroOct.category, 'assinaturas');
+  assert.ok(claroOct.tags.includes('parcela lembrada'));
+
+  // Recategorizar na fatura nova atualiza a parcela já lançada.
+  claroOct.category = 'contas';
+  const res = P.invoice.importRows(store, oct.rows, []);
+  assert.equal(res.installmentsUpdated, 1);
+  const claros = store.data.transactions.filter((t) => t.group === claroSep.group);
+  assert.equal(claros.length, 2);
+  assert.ok(claros.every((t) => t.category === 'contas'));
+
+  // Editar uma parcela no Orçamento aplica às demais.
+  const n = store.applyCategoryToGroup(claroSep.group, 'moradia');
+  assert.equal(n, 2);
+  assert.equal(store.data.settings.installmentRules[claroSep.group], 'moradia');
+  const round = P.normalizeData(JSON.parse(JSON.stringify(store.data)));
+  assert.equal(round.transactions.filter((t) => t.group === claroSep.group).length, 2);
+  assert.equal(round.settings.installmentRules[claroSep.group], 'moradia');
 });

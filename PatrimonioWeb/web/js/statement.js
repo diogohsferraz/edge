@@ -153,7 +153,9 @@
       if (!r.include) return;
       if (existing.has(r.ref)) return duplicates++;
       const cat = P.categoryById(r.category);
-      store.data.transactions.push({ id: U.uid(), date: r.date, amount: r.amount, category: cat.id, income: cat.income, note: r.note, ref: r.ref });
+      const tx = { id: U.uid(), date: r.date, amount: r.amount, category: cat.id, income: cat.income, note: r.note, ref: r.ref };
+      if (r.group) tx.group = r.group;
+      store.data.transactions.push(tx);
       existing.add(r.ref);
       added++;
     });

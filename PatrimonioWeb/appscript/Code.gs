@@ -28,7 +28,7 @@ var TABS = [
   },
   {
     key: 'transactions', name: 'Orçamento',
-    cols: [['id', 'ID'], ['date', 'Data', 'date'], ['amount', 'Valor', 'money'], ['category', 'Categoria'], ['income', 'Receita'], ['note', 'Descrição'], ['ref', 'Ref. extrato']],
+    cols: [['id', 'ID'], ['date', 'Data', 'date'], ['amount', 'Valor', 'money'], ['category', 'Categoria'], ['income', 'Receita'], ['note', 'Descrição'], ['ref', 'Ref. extrato'], ['group', 'Compra parcelada']],
   },
 ];
 var CONFIG_TAB = 'Config';
@@ -118,6 +118,9 @@ function getData() {
       if (k === 'goal') data.settings.goal = Number(r[1]) || 0;
       if (k === 'hideValues') data.settings.hideValues = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
       if (k === 'cardItemized') data.settings.cardItemized = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
+      if (k === 'installmentRules') {
+        try { data.settings.installmentRules = JSON.parse(r[1]); } catch (e) { data.settings.installmentRules = {}; }
+      }
       if (k === 'customCategories') {
         try { data.customCategories = JSON.parse(r[1]); } catch (e) { data.customCategories = []; }
       }
@@ -167,7 +170,8 @@ function saveData(json) {
     var config = ss.getSheetByName(CONFIG_TAB) || ss.insertSheet(CONFIG_TAB);
     config.clearContents();
     var s = data.settings || {};
-    config.getRange(1, 1, 6, 2).setValues([
+    config.getRange(1, 1, 7, 2).setValues([
+      ['installmentRules', JSON.stringify(s.installmentRules || {})],
       ['goal', Number(s.goal) || 0],
       ['hideValues', s.hideValues === true],
       ['cardItemized', s.cardItemized === true],

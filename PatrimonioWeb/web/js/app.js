@@ -1059,6 +1059,29 @@
     $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
   }
 
+  /**
+   * Ao trocar a categoria de uma linha da prévia, aplica o mesmo às linhas "iguais":
+   * outras parcelas da mesma compra ou o mesmo estabelecimento/favorecido.
+   */
+  function bindCategoryPropagation(form, rows) {
+    const keyOf = (r) => r.group || (r.income ? 'in:' : 'out:') + U.norm(r.details || r.title);
+    $$('[data-st-cat]', form).forEach((el) =>
+      el.addEventListener('change', () => {
+        const r = rows[el.dataset.stCat];
+        r.category = el.value;
+        let n = 0;
+        $$('[data-st-cat]', form).forEach((other) => {
+          const o = rows[other.dataset.stCat];
+          if (other === el || o.income !== r.income || keyOf(o) !== keyOf(r) || o.duplicate) return;
+          other.value = el.value;
+          o.category = el.value;
+          n++;
+        });
+        if (n) toast('Categoria aplicada também a ' + n + ' lançamento(s) iguais' + (r.group ? ' (parcelas da mesma compra)' : '') + '.');
+      })
+    );
+  }
+
   function bindPreviewTotals(form, rows, extra) {
     const recalc = () => {
       let inc = 0, exp = 0;
@@ -1125,7 +1148,10 @@
           },
         },
       ],
-      onOpen: (form) => bindPreviewTotals(form, rows),
+      onOpen: (form) => {
+        bindPreviewTotals(form, rows);
+        bindCategoryPropagation(form, rows);
+      },
     });
   }
 
@@ -1166,6 +1192,7 @@
     }
     const { info, rows } = parsed;
     markKnown(rows);
+    P.invoice.applyInstallmentRules(store, rows);
     const payments = P.invoice.findCardPayments(store, parsed);
     const dups = rows.filter((r) => r.duplicate).length;
     const body =
@@ -1207,18 +1234,20 @@
             finishImport(
               close,
               rows,
-              res.added + ' lançamento(s) da fatura importado(s)' + (res.removed ? ', ' + res.removed + ' pagamento(s) de fatura removido(s)' : '') + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.'
+              res.added + ' lançamento(s) da fatura importado(s)' + (res.removed ? ', ' + res.removed + ' pagamento(s) de fatura removido(s)' : '') + (res.installmentsUpdated ? ', ' + res.installmentsUpdated + ' parcela(s) anterior(es) recategorizada(s)' : '') + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.'
             );
           },
         },
       ],
-      onOpen: (form) =>
+      onOpen: (form) => {
+        bindCategoryPropagation(form, rows);
         bindPreviewTotals(form, rows, (inc, exp) => {
           const sel = exp - inc;
           const el = $('#inv-sel', form);
           const ok = info.total !== null && Math.abs(sel - info.total) < 0.01;
           el.innerHTML = U.money(sel) + (info.total !== null ? (ok ? ' <span class="pos" title="Confere com o total da fatura">✓</span>' : ' <span class="neg" title="Diferente do total da fatura">≠</span>') : '');
-        }),
+        });
+      },
     });
   }
 
@@ -1654,8 +1683,14 @@
         const amount = U.parseNumber(val(form, 'amount'));
         if (!(amount > 0)) return form.elements.amount.focus();
         if (val(form, 'category') === '__new') return form.elements.category.focus();
-        store.saveTransaction({ id: tx ? tx.id : undefined, date: val(form, 'date') || U.today(), amount: Math.abs(amount), category: val(form, 'category'), note: val(form, 'note') });
+        const category = val(form, 'category');
+        const changedCategory = tx && tx.category !== category;
+        store.saveTransaction({ id: tx ? tx.id : undefined, date: val(form, 'date') || U.today(), amount: Math.abs(amount), category, note: val(form, 'note') });
         close();
+        if (changedCategory && tx.group) {
+          const n = store.applyCategoryToGroup(tx.group, category);
+          toast(n ? 'Categoria aplicada também a ' + n + ' outra(s) parcela(s) desta compra. As próximas faturas já virão assim.' : 'As próximas parcelas desta compra virão com esta categoria.');
+        }
       },
     });
     openModal({
@@ -1664,7 +1699,10 @@
         '<div class="field"><label>Tipo</label><div class="seg" id="tx-type"><button type="button" data-inc="0" class="' + (!income ? 'on' : '') + '">Despesa</button><button type="button" data-inc="1" class="' + (income ? 'on' : '') + '">Receita</button></div></div>' +
         '<div class="form-row">' + field('Valor (R$)', '<input class="money-input" inputmode="decimal" name="amount" placeholder="0,00" value="' + esc(tx ? U.editable(tx.amount) : '') + '">') + field('Data', '<input type="date" name="date" value="' + t.date + '">') + '</div>' +
         field('Categoria', '<select name="category">' + catOptions(income, t.category) + '</select>') +
-        field('Descrição', '<input type="text" name="note" value="' + esc(t.note) + '">'),
+        field('Descrição', '<input type="text" name="note" value="' + esc(t.note) + '">') +
+        (tx && tx.group
+          ? '<p class="faint">Compra parcelada: ' + store.data.transactions.filter((x) => x.group === tx.group).length + ' parcela(s) lançada(s). Ao trocar a categoria, todas as parcelas desta compra (e as próximas) acompanham.</p>'
+          : ''),
       actions,
       onOpen: (form) => {
         $$('#tx-type button', form).forEach((b) =>

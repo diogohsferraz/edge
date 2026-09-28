@@ -224,10 +224,11 @@
         const cat = P.categoryById(t.category);
         const out = { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
         if (t.ref) out.ref = str(t.ref);
+        if (t.group) out.group = str(t.group);
         return out;
       });
     const s = raw.settings || {};
-    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true' };
+    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true', installmentRules: s.installmentRules && typeof s.installmentRules === 'object' ? s.installmentRules : {} };
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
@@ -450,9 +451,28 @@
         data.customCategories = data.customCategories.filter((c) => !ids.has(c.id));
         const rules = data.settings.categoryRules || {};
         Object.keys(rules).forEach((k) => ids.has(rules[k]) && (rules[k] = target));
+        const irules = data.settings.installmentRules || {};
+        Object.keys(irules).forEach((k) => ids.has(irules[k]) && (irules[k] = target));
         P.setCustomCategories(data.customCategories);
         store.commit();
         return moved;
+      },
+      /** Aplica a categoria a todos os lançamentos (parcelas) do grupo e lembra para as próximas. */
+      applyCategoryToGroup(group, categoryId, autoCommit) {
+        if (!group) return 0;
+        const cat = P.categoryById(categoryId);
+        let changed = 0;
+        data.transactions.forEach((t) => {
+          if (t.group === group && t.category !== cat.id) {
+            t.category = cat.id;
+            t.income = cat.income;
+            changed++;
+          }
+        });
+        data.settings.installmentRules = data.settings.installmentRules || {};
+        data.settings.installmentRules[group] = cat.id;
+        if (autoCommit !== false) store.commit();
+        return changed;
       },
       categoryUsage(id) {
         return data.transactions.filter((t) => P.inCategory(t.category, id)).length;
