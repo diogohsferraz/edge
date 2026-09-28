@@ -61,7 +61,7 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
 ## Windows
 
 ### Instalar
-Baixe o instalador em **GitHub › Actions › "Patrimônio web, Apps Script e Windows" › execução mais recente › Artifacts › Patrimonio-Windows**. O pacote traz dois arquivos:
+Baixe o instalador na página **[Releases › Patrimônio para Windows](https://github.com/diogohsferraz/edge/releases/tag/patrimonio-windows)**, atualizada a cada versão nova. Também fica em **GitHub › Actions › "Patrimônio web, Apps Script e Windows" › execução mais recente › Artifacts › Patrimonio-Windows** (um .zip). São dois arquivos:
 - `Patrimonio-Instalador-1.0.0.exe`: instala e cria um atalho no Menu Iniciar.
 - `Patrimonio-Portatil-1.0.0.exe`: roda direto, sem instalar (dá até para levar num pendrive).
 

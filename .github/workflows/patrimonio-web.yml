@@ -31,6 +31,8 @@ jobs:
   windows:
     needs: tests
     runs-on: windows-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: PatrimonioWeb/windows
@@ -52,3 +54,21 @@ jobs:
           path: |
             PatrimonioWeb/windows/dist/*.exe
           if-no-files-found: error
+      # Página fixa de download: github.com/<repo>/releases/tag/patrimonio-windows
+      - name: Publicar em Releases
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: patrimonio-windows
+          name: Patrimônio para Windows
+          body: |
+            Baixe um dos arquivos abaixo:
+            - **Patrimonio-Instalador-1.0.0.exe**: instala e cria atalho no Menu Iniciar.
+            - **Patrimonio-Portatil-1.0.0.exe**: roda direto, sem instalar.
+
+            O Windows pode avisar "O Windows protegeu o computador" (o app não tem assinatura digital): clique em **Mais informações › Executar assim mesmo**.
+
+            Versão gerada a partir do commit ${{ github.sha }}.
+          files: PatrimonioWeb/windows/dist/*.exe
+          make_latest: true
+          fail_on_unmatched_files: true
