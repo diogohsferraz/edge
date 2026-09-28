@@ -21,6 +21,12 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
 - **Carteira:** investimentos agrupados por instituição ou por classe, com busca, detalhe de cada ativo (gráfico, histórico, vencimento) e opção de arquivar.
 - **Atualizar:** o "fechamento do mês". Uma tabela com todos os investimentos agrupados por banco, onde você digita os saldos de uma vez e, se quiser, os aportes e resgates. O botão "=" repete o saldo anterior.
 - **Orçamento:** receitas e despesas por categoria, taxa de poupança e comparativo de 6 meses.
+  - **Importar extrato bancário (CSV)**, testado com o extrato de conta corrente do **Banco do Brasil**:
+    - as linhas de saldo são ignoradas;
+    - movimentações de investimento (BB Rende Fácil, poupança, Tesouro) vêm desmarcadas;
+    - a categoria é sugerida pela descrição (posto → Transporte, condomínio → Moradia, fatura → Cartão…);
+    - o app lembra a categoria que você escolher para cada favorecido;
+    - importar o mesmo extrato de novo não duplica os lançamentos.
 - **Ajustes:**
   - Importar a planilha em **CSV**, no formato de colunas por mês ou de lançamentos.
   - Exportar os dados em CSV e fazer backup e restauração em JSON.

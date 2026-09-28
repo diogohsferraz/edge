@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: PatrimonioWeb/windows/package-lock.json
       - run: npm ci
       - name: Gerar instalador e versão portátil
-        run: npm run dist -- -c.win.signAndEditExecutable=true
+        run: npm run dist -- --config.win.signAndEditExecutable=true --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4

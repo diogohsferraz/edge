@@ -6,10 +6,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadCore() {
-  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON };
+  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'statement.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx, { filename: f });
   }
   return ctx.Patrimonio;
@@ -159,4 +159,50 @@ test('excluir instituição apaga investimentos e históricos', () => {
   store.deleteInstitution(nubank.id);
   assert.equal(store.data.assets.length, 1);
   assert.ok(store.data.snapshots.every((s) => store.asset(s.assetId)));
+});
+
+test('importa extrato do Banco do Brasil (Latin-1) sem saldos e sem movimentações de investimento', () => {
+  const buf = fs.readFileSync(path.join(__dirname, 'fixtures', 'extrato-bb-exemplo.csv'));
+  const text = new TextDecoder('windows-1252').decode(buf);
+  const header = P.csv.parse(text)[0];
+  assert.ok(P.statement.isStatement(header));
+  const { rows, skipped } = P.statement.parse(text);
+  assert.equal(skipped.balance, 3);
+  assert.equal(skipped.investment, 4);
+  const inc = rows.filter((r) => r.include);
+  assert.equal(inc.length, 8);
+  const cat = (t) => inc.find((r) => r.title === t).category;
+  assert.equal(cat('Recebimento de Proventos'), 'salario');
+  assert.equal(cat('Compra com Cartão'), 'transporte');
+  assert.equal(cat('Pagamento de Boleto'), 'moradia');
+  assert.equal(cat('Pagto cartão crédito'), 'cartao');
+  assert.equal(cat('Pagamento de Impostos'), 'impostos');
+  assert.equal(cat('Pix - Recebido'), 'outrasReceitas');
+  assert.equal(inc.find((r) => r.details.startsWith('SMARTFIT')).category, 'saude');
+  assert.equal(inc.find((r) => r.title === 'Pix - Enviado' && r.amount === 32).category, 'outrosGastos');
+
+  const store = P.createStore(memoryBackend());
+  assert.equal(P.statement.importRows(store, rows).added, 8);
+  const total = (income) => store.data.transactions.filter((t) => t.income === income).reduce((a, t) => a + t.amount, 0);
+  near(total(true), 8750);
+  near(total(false), 32 + 150 + 650 + 195.72 + 1234.56 + 99.9);
+  // Importar o mesmo extrato de novo não duplica.
+  const again = P.statement.importRows(store, P.statement.parse(text).rows);
+  assert.equal(again.added, 0);
+  assert.equal(again.duplicates, 8);
+  assert.ok(store.data.transactions.every((t) => t.ref));
+  assert.ok(P.normalizeData(JSON.parse(JSON.stringify(store.data))).transactions.every((t) => t.ref));
+});
+
+test('lembra a categoria escolhida para o favorecido na próxima importação', () => {
+  const text = new TextDecoder('windows-1252').decode(fs.readFileSync(path.join(__dirname, 'fixtures', 'extrato-bb-exemplo.csv')));
+  const store = P.createStore(memoryBackend());
+  const first = P.statement.parse(text).rows;
+  first.find((r) => r.details === 'Fulano de Tal').category = 'moradia';
+  P.statement.importRows(store, first);
+  const second = P.statement.applyRules(P.statement.parse(text).rows, store.data.settings.categoryRules);
+  const row = second.find((r) => r.details === 'Fulano de Tal');
+  assert.equal(row.category, 'moradia');
+  assert.equal(row.remembered, true);
+  assert.equal(second.find((r) => r.details === 'POSTO EXEMPLO').remembered, undefined);
 });

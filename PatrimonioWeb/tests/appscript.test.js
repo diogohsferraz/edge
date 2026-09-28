@@ -10,7 +10,7 @@ function loadCore() {
   const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'statement.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx);
   }
   return ctx.Patrimonio;
@@ -68,4 +68,13 @@ test('exporta para o Drive e busca séries do Banco Central', () => {
   assert.equal(files[0].name, 'patrimonio.csv');
   assert.equal(JSON.parse(ctx.fetchSeries(4391))[0].valor, '1.16');
   assert.throws(() => ctx.fetchSeries(999));
+});
+
+test('regras de categoria e referência do extrato sobrevivem à planilha', () => {
+  const { ctx } = loadGas();
+  const d = { institutions: [], assets: [], snapshots: [], movements: [], transactions: [{ id: 't1', date: '2026-09-01', amount: 10, category: 'moradia', income: false, note: 'x', ref: 'extrato:abc' }], settings: { goal: 0, categoryRules: { 'fulano de tal': 'moradia' } }, benchmarks: {} };
+  ctx.saveData(JSON.stringify(d));
+  const back = JSON.parse(ctx.getData());
+  assert.equal(back.transactions[0].ref, 'extrato:abc');
+  assert.equal(back.settings.categoryRules['fulano de tal'], 'moradia');
 });

@@ -216,6 +216,8 @@ svg { fill: currentColor; }
 .update-table .money-input { width: 150px; }
 .update-table .flow { display: flex; gap: 6px; }
 .update-table select { width: 110px; }
+.statement-table tr.off td { opacity: 0.45; }
+.statement-table td { font-size: 13.5px; }
 
 /* ---------- Formulários ---------- */
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
@@ -290,9 +292,9 @@ pre.code {
   .kpi-value { font-size: 28px; }
   .form-row { grid-template-columns: 1fr; }
   .search { min-width: 0; flex: 1; }
-  .update-table thead { display: none; }
-  .update-table tr:not(.inst) { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .update-table tr:not(.inst) td { border: 0; padding: 2px 4px; }
+  .update-table:not(.statement-table) thead { display: none; }
+  .update-table:not(.statement-table) tr:not(.inst) { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .update-table:not(.statement-table) tr:not(.inst) td { border: 0; padding: 2px 4px; }
   .update-table td.last { grid-column: 1 / 2; }
   .update-table td.flowcell { grid-column: 1 / 3; }
   .update-table .money-input { width: 130px; }
@@ -635,6 +637,7 @@ pre.code {
     { id: 'assinaturas', title: 'Assinaturas', income: false, color: '#AC8E68' },
     { id: 'contas', title: 'Contas da casa', income: false, color: '#30B0C7' },
     { id: 'viagem', title: 'Viagem', income: false, color: '#66D4CF' },
+    { id: 'cartao', title: 'Fatura do cartão', income: false, color: '#1C1C1E' },
     { id: 'impostos', title: 'Impostos e taxas', income: false, color: '#8E8E93' },
     { id: 'pets', title: 'Pets', income: false, color: '#A2845E' },
     { id: 'outrosGastos', title: 'Outros gastos', income: false, color: '#636366' },
@@ -666,7 +669,7 @@ pre.code {
       snapshots: [],
       movements: [],
       transactions: [],
-      settings: { goal: 0, hideValues: false },
+      settings: { goal: 0, hideValues: false, categoryRules: {} },
       benchmarks: { cdi: {}, ipca: {}, updated: null },
     };
   };
@@ -713,10 +716,12 @@ pre.code {
       .filter((t) => t && t.id && date(t.date))
       .map((t) => {
         const cat = P.categoryById(t.category);
-        return { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
+        const out = { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
+        if (t.ref) out.ref = str(t.ref);
+        return out;
       });
     const s = raw.settings || {};
-    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true' };
+    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {} };
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
@@ -1460,6 +1465,171 @@ pre.code {
   ].join('\n');
 })(typeof window !== 'undefined' ? window : globalThis);
 
+/* js/statement.js */
+/* Importação de extrato bancário (CSV) para o Orçamento.
+ * Testado com o extrato de conta corrente do Banco do Brasil:
+ *   "Data","Lançamento","Detalhes","N° documento","Valor","Tipo Lançamento"
+ * e compatível com extratos genéricos que tenham colunas de data, descrição e valor. */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+  const S = (P.statement = {});
+
+  const COLS = {
+    date: ['data', 'data lancamento', 'data do lancamento', 'date'],
+    title: ['lancamento', 'historico', 'descricao', 'title', 'estabelecimento'],
+    details: ['detalhes', 'complemento', 'observacao'],
+    doc: ['n documento', 'no documento', 'n° documento', 'documento', 'numero documento', 'identificador'],
+    amount: ['valor', 'valor (r$)', 'amount', 'valor r$'],
+    type: ['tipo lancamento', 'tipo', 'tipo de lancamento'],
+  };
+
+  /** Linhas que não são lançamentos (saldos). */
+  const SKIP_BALANCE = /^(saldo( anterior| do dia| atual| final)?|s a l d o|saldo disponivel)$/;
+
+  /** Movimentações entre a conta e investimentos: não são receita nem despesa. */
+  const INVESTMENT = /(rende facil|poupanca|aplicacao|resgate|tesouro dir|cdb|lci|lca|fundo|invest|corretora|previdencia|bb acoes|renda fixa|debito automatico invest)/;
+
+  S.isStatement = function (headerRow) {
+    const h = headerRow.map(U.norm);
+    const has = (list) => h.some((x) => list.includes(x));
+    return has(COLS.date) && has(COLS.amount) && has(COLS.title) && !h.includes('ativo') && !h.includes('investimento');
+  };
+
+  /** Sugere uma categoria a partir da descrição. */
+  S.guessCategory = function (text, income) {
+    const t = U.norm(text);
+    const rules = income
+      ? [
+          ['salario', ['proventos', 'salario', 'pagamento de salario', 'folha', 'vencimento', 'remuneracao']],
+          ['rendimentos', ['rendimento', 'juros', 'dividendo', 'amortizacao']],
+          ['freelance', ['honorario', 'servico prestado']],
+        ]
+      : [
+          ['cartao', ['cartao credito', 'cartao de credito', 'pagto cartao', 'fatura']],
+          ['impostos', ['imposto', 'darf', 'iptu', 'ipva', 'tributo', 'receita federal', 'taxa']],
+          ['moradia', ['edificio', 'condominio', 'aluguel', 'residencial', 'imobiliaria', 'res ']],
+          ['contas', ['energia', 'equatorial', 'neoenergia', 'enel', 'cemig', 'light', 'agua', 'casal', 'sabesp', 'internet', 'claro', 'vivo', 'tim ', 'oi ', 'net ', 'gas ']],
+          ['transporte', ['posto', 'combust', 'shell', 'ipiranga', 'uber', '99 ', '99app', 'estacion', 'pedagio', 'sem parar', 'detran']],
+          ['compras', ['magazine', 'americanas', 'shopee', 'mercadolivre', 'mercado livre', 'amazon', 'shein', 'renner', 'riachuelo']],
+          ['mercado', ['supermerc', 'mercado', 'atacad', 'assai', 'carrefour', 'hortifruti', 'padaria', 'extra ', 'pao de acucar']],
+          ['alimentacao', ['restaurante', 'ifood', 'lanche', 'burger', 'pizza', 'bar ', 'cafe']],
+          ['saude', ['farmacia', 'drogaria', 'drogasil', 'pague menos', 'hospital', 'clinica', 'laborat', 'unimed', 'hapvida', 'smartfit', 'academia', 'odonto', 'medic']],
+          ['educacao', ['escola', 'colegio', 'faculdade', 'curso', 'livraria', 'udemy']],
+          ['assinaturas', ['netflix', 'spotify', 'amazon prime', 'disney', 'youtube', 'apple.com', 'google', 'hbo', 'globoplay']],
+          ['viagem', ['hotel', 'airbnb', 'latam', 'gol ', 'azul ', 'booking', 'decolar']],
+          ['pets', ['pet', 'veterin', 'cobasi', 'petz']],
+          ['lazer', ['cinema', 'ingresso', 'show', 'teatro', 'steam', 'playstation']],
+        ];
+    for (const [cat, keys] of rules) if (keys.some((k) => t.includes(k.trim()) && (k.endsWith(' ') ? (' ' + t + ' ').includes(' ' + k) : true))) return cat;
+    return income ? 'outrasReceitas' : 'outrosGastos';
+  };
+
+  /** Remove o prefixo "03/09 18:00 " que o BB coloca nos detalhes de Pix e cartão. */
+  function cleanDetails(s) {
+    return String(s || '').replace(/^\d{2}\/\d{2}(\s+\d{2}:\d{2})?\s+/, '').replace(/\s+/g, ' ').trim();
+  }
+
+  function titleCase(s) {
+    return s.toLowerCase().replace(/(^|\s)(\S)/g, (m, sp, ch) => sp + ch.toUpperCase());
+  }
+
+  /**
+   * Lê o extrato e devolve as linhas classificadas.
+   * @returns {{rows: Array, skipped: {balance:number, investment:number, invalid:number}}}
+   */
+  S.parse = function (text) {
+    const table = P.csv.parse(text);
+    if (table.length < 2) throw new Error('O extrato está vazio.');
+    const header = table[0].map(U.norm);
+    const idx = {};
+    Object.keys(COLS).forEach((k) => {
+      const i = header.findIndex((h) => COLS[k].includes(h));
+      if (i >= 0) idx[k] = i;
+    });
+    if (idx.date === undefined || idx.amount === undefined || idx.title === undefined) {
+      throw new Error('Não reconheci as colunas do extrato. É preciso ter Data, Lançamento/Descrição e Valor.');
+    }
+    const cell = (r, k) => (idx[k] !== undefined && idx[k] < r.length ? r[idx[k]] : '');
+    const skipped = { balance: 0, investment: 0, invalid: 0 };
+    const rows = [];
+    table.slice(1).forEach((r, line) => {
+      const title = cell(r, 'title').trim();
+      const nt = U.norm(title);
+      if (SKIP_BALANCE.test(nt)) return skipped.balance++;
+      const date = P.csv.parseDate(cell(r, 'date'));
+      let amount = U.parseNumber(cell(r, 'amount'));
+      if (!date || amount === null || amount === 0) return skipped.invalid++;
+      const type = U.norm(cell(r, 'type'));
+      if (type === 'saida' && amount > 0) amount = -amount;
+      if (type === 'entrada' && amount < 0) amount = -amount;
+      const details = cleanDetails(cell(r, 'details'));
+      const investment = INVESTMENT.test(nt) || INVESTMENT.test(U.norm(details));
+      const income = amount > 0;
+      const note = details ? titleCase(title) + ' · ' + titleCase(details) : titleCase(title);
+      const doc = cell(r, 'doc').trim();
+      rows.push({
+        line: line + 2,
+        date,
+        title,
+        details,
+        note,
+        amount: Math.abs(amount),
+        income,
+        investment,
+        category: S.guessCategory(title + ' ' + details, income),
+        ref: 'extrato:' + date + ':' + (doc || line) + ':' + Math.abs(amount).toFixed(2) + ':' + U.norm(title),
+        include: !investment,
+      });
+    });
+    rows.forEach((r) => r.investment && skipped.investment++);
+    return { rows, skipped };
+  };
+
+  /** Chave usada para lembrar a categoria escolhida para um favorecido/descrição. */
+  S.ruleKey = function (r) {
+    return U.norm(r.details || r.title).replace(/[0-9./-]{6,}/g, '').trim();
+  };
+
+  /** Aplica as categorias que o usuário escolheu em importações anteriores. */
+  S.applyRules = function (rows, rules) {
+    rules = rules || {};
+    rows.forEach((r) => {
+      const c = rules[S.ruleKey(r)];
+      if (c && P.categoryById(c).income === r.income) {
+        r.category = c;
+        r.remembered = true;
+      }
+    });
+    return rows;
+  };
+
+  /** Grava as linhas escolhidas no Orçamento, sem duplicar o que já foi importado. */
+  S.importRows = function (store, rows) {
+    const rules = (store.data.settings.categoryRules = store.data.settings.categoryRules || {});
+    rows.forEach((r) => {
+      if (!r.include || r.investment) return;
+      const key = S.ruleKey(r);
+      const guessed = S.guessCategory(r.title + ' ' + r.details, r.income);
+      if (key && r.category !== guessed) rules[key] = r.category;
+      else if (key && rules[key] && r.category === guessed) delete rules[key];
+    });
+    const existing = new Set(store.data.transactions.map((t) => t.ref).filter(Boolean));
+    let added = 0, duplicates = 0;
+    rows.forEach((r) => {
+      if (!r.include) return;
+      if (existing.has(r.ref)) return duplicates++;
+      const cat = P.categoryById(r.category);
+      store.data.transactions.push({ id: U.uid(), date: r.date, amount: r.amount, category: cat.id, income: cat.income, note: r.note, ref: r.ref });
+      existing.add(r.ref);
+      added++;
+    });
+    store.commit();
+    return { added, duplicates };
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
 /* js/sample.js */
 /* Carteira de exemplo com 18 meses de histórico. */
 (function (g) {
@@ -2108,6 +2278,7 @@ pre.code {
     'refresh-bench': () => refreshBenchmarks(true),
     'open-data-folder': () => g.desktopAPI && g.desktopAPI.openDataFolder(),
     'import-csv': () => pickFile('.csv,.txt,.tsv,text/csv', importCSV),
+    'import-statement': () => pickFile('.csv,.txt,text/csv', openStatementPreview),
     'import-json': () => pickFile('.json,application/json', importJSON),
     'export-csv': () => exportFile('patrimonio.csv', P.csv.exportPortfolio(store)),
     'export-tx': () => exportFile('orcamento.csv', P.csv.exportTransactions(store)),
@@ -2638,7 +2809,7 @@ pre.code {
 
     view.innerHTML =
       '<div class="toolbar"><button class="btn small" data-action="cash-prev">‹</button><strong style="min-width:170px;text-align:center">' + U.fmtMonthLong(mk) + '</strong><button class="btn small" data-action="cash-next">›</button>' +
-      '<span class="spacer"></span><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
+      '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
       '<div class="grid">' +
       '<section class="card span-12"><div class="kpi-row" style="margin:0;padding:0;border:0">' +
       kpi('Receitas', '<span class="pos">' + money(income) + '</span>') +
@@ -2709,7 +2880,7 @@ pre.code {
         : '<p class="muted">Nenhuma instituição cadastrada.</p>') +
       '</div></section>' +
       '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel ou Google Planilhas salvando-a como CSV.</p>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="import-statement">Importar extrato bancário</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="export-csv"' + (d.assets.length ? '' : ' disabled') + '>Exportar investimentos</button><button class="btn" data-action="export-tx"' + (d.transactions.length ? '' : ' disabled') + '>Exportar orçamento</button></div></section>' +
       '<section class="card span-6"><h3 class="card-title">Backup</h3><p class="muted">Um arquivo com todos os dados. Serve também para levar seus dados entre a versão Windows e a versão web.</p>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="export-json">Exportar backup (.json)</button><button class="btn" data-action="import-json">Restaurar backup</button></div></section>' +
@@ -2777,12 +2948,95 @@ pre.code {
   }
 
   function importCSV(text) {
+    const rows = P.csv.parse(text);
+    if (rows.length && P.statement.isStatement(rows[0])) return openStatementPreview(text);
     try {
       const summary = P.csv.importInto(store, text);
       openModal({ title: 'Importação concluída', body: '<p>' + esc(P.csv.describe(summary)) + '</p>', actions: [{ label: 'Ver carteira', cls: 'primary', onClick: (close) => (close(), go('portfolio')) }] });
     } catch (e) {
       openModal({ title: 'Não foi possível importar', body: '<p>' + esc(e.message) + '</p><p class="muted">Veja "Como preparar a planilha" para os formatos aceitos.</p>' });
     }
+  }
+
+  function openStatementPreview(text) {
+    let parsed;
+    try {
+      parsed = P.statement.parse(text);
+    } catch (e) {
+      return openModal({ title: 'Não foi possível ler o extrato', body: '<p>' + esc(e.message) + '</p>' });
+    }
+    const { rows, skipped } = parsed;
+    P.statement.applyRules(rows, store.data.settings.categoryRules);
+    const known = new Set(store.data.transactions.map((t) => t.ref).filter(Boolean));
+    rows.forEach((r) => {
+      r.duplicate = known.has(r.ref);
+      if (r.duplicate) r.include = false;
+    });
+    const catOptions = (r) =>
+      P.CASH_CATEGORIES.filter((c) => c.income === r.income)
+        .map((c) => '<option value="' + c.id + '"' + (c.id === r.category ? ' selected' : '') + '>' + esc(c.title) + '</option>')
+        .join('');
+    const inc = rows.filter((r) => r.include && r.income).reduce((a, r) => a + r.amount, 0);
+    const exp = rows.filter((r) => r.include && !r.income).reduce((a, r) => a + r.amount, 0);
+    const dups = rows.filter((r) => r.duplicate).length;
+    const body =
+      '<p class="muted">Confira as categorias sugeridas antes de importar: o app lembra o que você escolher para cada favorecido nas próximas importações. Movimentações entre a conta e seus investimentos (ex.: BB Rende Fácil, poupança, Tesouro) vêm desmarcadas porque não são receita nem despesa.</p>' +
+      '<div class="kpi-row" style="margin:0 0 12px;padding:0;border:0">' +
+      kpi('Entradas', '<span class="pos" id="st-inc">' + money(inc) + '</span>') +
+      kpi('Saídas', '<span class="neg" id="st-exp">' + money(exp) + '</span>') +
+      kpi('Investimentos (desmarcados)', String(skipped.investment)) +
+      kpi('Linhas de saldo ignoradas', String(skipped.balance)) +
+      (dups ? kpi('Já importados', String(dups)) : '') +
+      '</div>' +
+      '<div style="overflow-x:auto"><table class="update-table statement-table"><thead><tr><th></th><th>Data</th><th>Descrição</th><th style="text-align:right">Valor</th><th>Categoria</th></tr></thead><tbody>' +
+      rows
+        .map(
+          (r, i) =>
+            '<tr class="' + (r.include ? '' : 'off') + '">' +
+            '<td><input type="checkbox" data-st-inc="' + i + '"' + (r.include ? ' checked' : '') + (r.duplicate ? ' disabled' : '') + '></td>' +
+            '<td class="num" style="white-space:nowrap">' + U.fmtShortDate(r.date) + '</td>' +
+            '<td><div style="font-weight:550">' + esc(r.title) + (r.investment ? ' <span class="tag">investimento</span>' : '') + (r.duplicate ? ' <span class="tag">já importado</span>' : '') + (r.remembered ? ' <span class="tag" title="Categoria que você escolheu antes">lembrado</span>' : '') + '</div><div class="faint">' + esc(r.details) + '</div></td>' +
+            '<td class="num ' + (r.income ? 'pos' : 'neg') + '" style="text-align:right;white-space:nowrap">' + (r.income ? '+' : '−') + U.money(r.amount) + '</td>' +
+            '<td><select data-st-cat="' + i + '" style="width:170px">' + catOptions(r) + '</select></td>' +
+            '</tr>'
+        )
+        .join('') +
+      '</tbody></table></div>';
+    openModal({
+      title: 'Importar extrato (' + rows.length + ' lançamentos)',
+      wide: true,
+      body,
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Importar selecionados',
+          cls: 'primary',
+          onClick: (close, form) => {
+            $$('[data-st-inc]', form).forEach((el) => (rows[el.dataset.stInc].include = el.checked));
+            $$('[data-st-cat]', form).forEach((el) => (rows[el.dataset.stCat].category = el.value));
+            const res = P.statement.importRows(store, rows);
+            const last = rows.filter((r) => r.include).map((r) => r.date).sort().pop();
+            if (last) state.cashMonth = U.monthKey(last);
+            close();
+            if (state.view !== 'cashflow') go('cashflow');
+            toast(res.added + ' lançamento(s) importado(s)' + (res.duplicates ? ', ' + res.duplicates + ' já existiam' : '') + '.');
+          },
+        },
+      ],
+      onOpen: (form) => {
+        const recalc = () => {
+          let i2 = 0, e2 = 0;
+          $$('[data-st-inc]', form).forEach((el) => {
+            const r = rows[el.dataset.stInc];
+            el.closest('tr').classList.toggle('off', !el.checked);
+            if (el.checked) r.income ? (i2 += r.amount) : (e2 += r.amount);
+          });
+          $('#st-inc', form).textContent = money(i2);
+          $('#st-exp', form).textContent = money(e2);
+        };
+        $$('[data-st-inc]', form).forEach((el) => el.addEventListener('change', recalc));
+      },
+    });
   }
 
   async function importJSON(text) {

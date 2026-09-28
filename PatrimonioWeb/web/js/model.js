@@ -68,6 +68,7 @@
     { id: 'assinaturas', title: 'Assinaturas', income: false, color: '#AC8E68' },
     { id: 'contas', title: 'Contas da casa', income: false, color: '#30B0C7' },
     { id: 'viagem', title: 'Viagem', income: false, color: '#66D4CF' },
+    { id: 'cartao', title: 'Fatura do cartão', income: false, color: '#1C1C1E' },
     { id: 'impostos', title: 'Impostos e taxas', income: false, color: '#8E8E93' },
     { id: 'pets', title: 'Pets', income: false, color: '#A2845E' },
     { id: 'outrosGastos', title: 'Outros gastos', income: false, color: '#636366' },
@@ -99,7 +100,7 @@
       snapshots: [],
       movements: [],
       transactions: [],
-      settings: { goal: 0, hideValues: false },
+      settings: { goal: 0, hideValues: false, categoryRules: {} },
       benchmarks: { cdi: {}, ipca: {}, updated: null },
     };
   };
@@ -146,10 +147,12 @@
       .filter((t) => t && t.id && date(t.date))
       .map((t) => {
         const cat = P.categoryById(t.category);
-        return { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
+        const out = { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
+        if (t.ref) out.ref = str(t.ref);
+        return out;
       });
     const s = raw.settings || {};
-    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true' };
+    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {} };
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
