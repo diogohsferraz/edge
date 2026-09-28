@@ -326,13 +326,13 @@ enum CSVService {
         return out.joined(separator: "\n")
     }
 
-    static func exportTransactionsCSV(_ transactions: [CashTransaction]) -> String {
+    static func exportTransactionsCSV(_ transactions: [CashTransaction], catalog: CategoryCatalog = CategoryCatalog()) -> String {
         var out = ["data;tipo;categoria;valor;descricao"]
         for t in transactions.sorted(by: { $0.date < $1.date }) {
             out.append([
                 Fmt.day.string(from: t.date),
                 t.isIncome ? "Receita" : "Despesa",
-                t.category.title,
+                catalog.label(t.categoryRaw),
                 Fmt.editable(t.amount).replacingOccurrences(of: ".", with: ""),
                 t.note,
             ].map(escape).joined(separator: ";"))

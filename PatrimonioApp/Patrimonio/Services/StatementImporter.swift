@@ -16,11 +16,21 @@ enum StatementImporter {
         let isInvestment: Bool
         let ref: String
         var category: CashCategory
+        /// Categoria personalizada escolhida (sobrepõe `category`).
+        var customKey: String?
         var include: Bool
         var isDuplicate = false
         var isRemembered = false
         /// Pagamento de fatura desmarcado porque as faturas do cartão são importadas detalhadas.
         var isCardPayment = false
+
+        /// Chave gravada no lançamento (padrão ou personalizada).
+        var categoryKey: String {
+            get { customKey ?? category.rawValue }
+            set {
+                if let c = CashCategory(rawValue: newValue) { category = c; customKey = nil } else { customKey = newValue }
+            }
+        }
     }
 
     /// Depois de importar uma fatura detalhada, o pagamento da fatura na conta vira transferência.
@@ -199,18 +209,18 @@ enum StatementImporter {
     }
 
     /// Aplica as categorias escolhidas em importações anteriores e marca o que já foi importado.
-    static func prepare(_ rows: [Row], rules: [String: String], existingRefs: Set<String>) -> [Row] {
+    static func prepare(_ rows: [Row], rules: [String: String], existingRefs: Set<String>, catalog: CategoryCatalog = CategoryCatalog()) -> [Row] {
         rows.map { row in
             var r = row
-            if let raw = rules[ruleKey(for: r)], let c = CashCategory(rawValue: raw), c.isIncome == r.isIncome {
-                r.category = c
+            if let raw = rules[ruleKey(for: r)], catalog.exists(raw), catalog.lookup(raw).isIncome == r.isIncome {
+                r.categoryKey = raw
                 r.isRemembered = true
             }
             if existingRefs.contains(r.ref) {
                 r.isDuplicate = true
                 r.include = false
             }
-            if cardItemized && !r.isIncome && r.category == .cartao {
+            if cardItemized && !r.isIncome && r.customKey == nil && r.category == .cartao {
                 r.isCardPayment = true
                 r.include = false
             }
@@ -225,7 +235,7 @@ enum StatementImporter {
             let key = ruleKey(for: r)
             guard !key.isEmpty else { continue }
             let guessed = guessCategory(r.title + " " + r.details, isIncome: r.isIncome)
-            if r.category != guessed { rules[key] = r.category.rawValue } else { rules.removeValue(forKey: key) }
+            if r.categoryKey != guessed.rawValue { rules[key] = r.categoryKey } else { rules.removeValue(forKey: key) }
         }
         return rules
     }
@@ -239,7 +249,7 @@ enum StatementImporter {
         var added = 0, duplicates = 0
         for r in rows where r.include {
             if seen.contains(r.ref) { duplicates += 1; continue }
-            context.insert(CashTransaction(date: r.date, amount: r.amount, category: r.category, note: r.note, ref: r.ref))
+            context.insert(CashTransaction(date: r.date, amount: r.amount, categoryKey: r.categoryKey, isIncome: r.isIncome, note: r.note, ref: r.ref))
             seen.insert(r.ref)
             added += 1
         }

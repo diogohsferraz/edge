@@ -27,12 +27,21 @@ enum InvoiceImporter {
         /// Categoria sugerida pela seção da fatura ou pela descrição.
         let suggested: CashCategory
         var category: CashCategory
+        /// Categoria personalizada escolhida (sobrepõe `category`).
+        var customKey: String?
         var include: Bool
         var tags: [String] = []
         var isDuplicate = false
         var isRemembered = false
 
         var isIncome: Bool { kind != .purchase }
+
+        var categoryKey: String {
+            get { customKey ?? category.rawValue }
+            set {
+                if let c = CashCategory(rawValue: newValue) { category = c; customKey = nil } else { customKey = newValue }
+            }
+        }
     }
 
     struct Info: Equatable {
@@ -275,11 +284,11 @@ enum InvoiceImporter {
             .map { t in (t, targets.contains { abs($0 - t.amount) < 0.01 }) }
     }
 
-    static func prepare(_ rows: [Row], rules: [String: String], existingRefs: Set<String>) -> [Row] {
+    static func prepare(_ rows: [Row], rules: [String: String], existingRefs: Set<String>, catalog: CategoryCatalog = CategoryCatalog()) -> [Row] {
         rows.map { row in
             var r = row
-            if r.kind == .purchase, let raw = rules[StatementImporter.ruleKey(title: r.title, details: "")], let c = CashCategory(rawValue: raw), !c.isIncome {
-                r.category = c
+            if r.kind == .purchase, let raw = rules[StatementImporter.ruleKey(title: r.title, details: "")], catalog.exists(raw), !catalog.lookup(raw).isIncome {
+                r.categoryKey = raw
                 r.isRemembered = true
             }
             if existingRefs.contains(r.ref) {
@@ -296,7 +305,7 @@ enum InvoiceImporter {
         for r in rows where r.include && r.kind == .purchase {
             let key = StatementImporter.ruleKey(title: r.title, details: "")
             guard !key.isEmpty else { continue }
-            if r.category != r.suggested { rules[key] = r.category.rawValue } else if r.isRemembered == false { rules.removeValue(forKey: key) }
+            if r.categoryKey != r.suggested.rawValue { rules[key] = r.categoryKey } else if r.isRemembered == false { rules.removeValue(forKey: key) }
         }
         return rules
     }
@@ -311,9 +320,9 @@ enum InvoiceImporter {
         var added = 0, duplicates = 0
         for r in rows where r.include {
             if seen.contains(r.ref) { duplicates += 1; continue }
-            let category = r.kind == .purchase ? r.category : .outrasReceitas
+            let categoryKey = r.kind == .purchase ? r.categoryKey : CashCategory.outrasReceitas.rawValue
             let note = r.kind == .credit ? "Crédito na fatura · " + r.note : r.note
-            context.insert(CashTransaction(date: r.date, amount: r.amount, category: category, note: note, ref: r.ref))
+            context.insert(CashTransaction(date: r.date, amount: r.amount, categoryKey: categoryKey, isIncome: r.kind != .purchase, note: note, ref: r.ref))
             seen.insert(r.ref)
             added += 1
         }

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject private var lock: AppLock
     @Query private var assets: [Asset]
     @Query private var transactions: [CashTransaction]
+    @Query private var customCategories: [CustomCategory]
 
     @AppStorage("hideValues") private var hideValues = false
     @AppStorage("lockEnabled") private var lockEnabled = false
@@ -29,6 +30,11 @@ struct SettingsView: View {
                         InstitutionsListView()
                     } label: {
                         Label("Bancos e corretoras", systemImage: "building.columns")
+                    }
+                    NavigationLink {
+                        CategoriesView()
+                    } label: {
+                        Label("Categorias do orçamento", systemImage: "tag")
                     }
                 }
 
@@ -73,7 +79,7 @@ struct SettingsView: View {
                     }
                     .disabled(assets.isEmpty)
                     Button {
-                        export(name: "orcamento.csv", contents: CSVService.exportTransactionsCSV(transactions))
+                        export(name: "orcamento.csv", contents: CSVService.exportTransactionsCSV(transactions, catalog: CategoryCatalog(customCategories)))
                     } label: {
                         Label("Exportar receitas e despesas (CSV)", systemImage: "square.and.arrow.up")
                     }

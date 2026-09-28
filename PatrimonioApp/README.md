@@ -33,6 +33,8 @@ A ideia combina o que os apps mais baixados do Brasil fazem melhor:
 Faz o papel da sua planilha: todos os investimentos ativos aparecem numa lista agrupada por banco. Você abre o app de cada banco e digita o saldo atual. Se quiser, registra também **aporte / resgate / provento** para a rentabilidade não confundir dinheiro novo com rendimento. O app avisa quais investimentos ainda não foram atualizados no mês.
 
 ### Orçamento
+**Categorias e subcategorias próprias** (ex.: Moradia › Condomínio), criadas em **Ajustes › Categorias do orçamento** ou direto no lançamento ("Nova categoria ou subcategoria"). No Orçamento, tocar numa categoria com subcategorias abre o detalhamento dela. Ao excluir uma categoria, os lançamentos dela passam para a categoria que você escolher.
+
 Receitas e despesas por categoria, resumo mensal, gráfico dos gastos por categoria e comparativo dos últimos 6 meses.
 
 **Importar extrato (CSV)**, no menu **+** do Orçamento ou em Ajustes, testado com o extrato de conta corrente do **Banco do Brasil**. As linhas de saldo são ignoradas e as movimentações de investimento (BB Rende Fácil, poupança, Tesouro) vêm desmarcadas. A categoria é sugerida pela descrição, e o app lembra a categoria que você escolher para cada favorecido. Importar o mesmo extrato de novo não duplica os lançamentos.

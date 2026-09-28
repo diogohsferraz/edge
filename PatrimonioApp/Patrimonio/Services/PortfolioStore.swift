@@ -67,6 +67,7 @@ enum PortfolioStore {
         wipe(Asset.self)
         wipe(Institution.self)
         wipe(CashTransaction.self)
+        wipe(CustomCategory.self)
         try? context.save()
     }
 }

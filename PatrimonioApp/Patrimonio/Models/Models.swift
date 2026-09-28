@@ -158,3 +158,39 @@ extension Institution {
     var activeAssets: [Asset] { assets.filter { !$0.isArchived } }
     var totalValue: Double { assets.reduce(0) { $0 + $1.currentValue } }
 }
+
+/// Categoria ou subcategoria de orçamento criada pelo usuário.
+@Model
+final class CustomCategory {
+    var uid: UUID = UUID()
+    /// Chave gravada em `CashTransaction.categoryRaw` ("c_<uuid>").
+    var key: String = ""
+    var title: String = ""
+    var isIncome: Bool = false
+    var colorHex: String = "#8E8E93"
+    /// Categoria principal (chave de uma categoria padrão ou personalizada). `nil` = categoria principal.
+    var parentKey: String?
+    var createdAt: Date = Date()
+
+    init(title: String, isIncome: Bool, colorHex: String, parentKey: String?) {
+        self.key = "c_" + uid.uuidString
+        self.title = title
+        self.isIncome = isIncome
+        self.colorHex = colorHex
+        self.parentKey = parentKey
+    }
+}
+
+extension CashTransaction {
+    /// Chave da categoria (padrão ou personalizada).
+    var categoryKey: String {
+        get { categoryRaw }
+        set { categoryRaw = newValue }
+    }
+
+    convenience init(date: Date, amount: Double, categoryKey: String, isIncome: Bool, note: String = "", ref: String = "") {
+        self.init(date: date, amount: amount, category: isIncome ? .outrasReceitas : .outrosGastos, note: note, ref: ref)
+        self.categoryRaw = categoryKey
+        self.isIncome = isIncome
+    }
+}

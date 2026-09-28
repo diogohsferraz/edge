@@ -13,6 +13,7 @@ struct PatrimonioApp: App {
             BalanceSnapshot.self,
             Movement.self,
             CashTransaction.self,
+            CustomCategory.self,
         ])
     }
 }

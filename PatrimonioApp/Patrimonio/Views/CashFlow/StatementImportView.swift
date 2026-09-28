@@ -45,6 +45,7 @@ struct StatementImportView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query private var transactions: [CashTransaction]
+    @Query private var customCategories: [CustomCategory]
     @State private var parsed: StatementImporter.Parsed?
     @State private var rows: [StatementImporter.Row] = []
     @State private var error: String?
@@ -110,7 +111,7 @@ struct StatementImportView: View {
             let p = try StatementImporter.parse(text)
             parsed = p
             let refs = Set(transactions.map(\.ref).filter { !$0.isEmpty })
-            rows = StatementImporter.prepare(p.rows, rules: StatementImporter.loadRules(), existingRefs: refs)
+            rows = StatementImporter.prepare(p.rows, rules: StatementImporter.loadRules(), existingRefs: refs, catalog: CategoryCatalog(customCategories))
         } catch {
             self.error = error.localizedDescription
         }
@@ -155,11 +156,7 @@ private struct StatementRowView: View {
                     .foregroundStyle(row.isIncome ? Color.green : Color.red)
             }
             if row.include {
-                Picker("Categoria", selection: $row.category) {
-                    ForEach(row.isIncome ? CashCategory.incomeCases : CashCategory.expenseCases) { c in
-                        Label(c.title, systemImage: c.icon).tag(c)
-                    }
-                }
+                CategoryPicker(isIncome: row.isIncome, selection: $row.categoryKey, allowNew: false)
                 .font(.subheadline)
             }
         }

@@ -414,3 +414,77 @@ final class InvoiceImporterTests: XCTestCase {
         XCTAssertTrue(card.isCardPayment)
     }
 }
+
+@MainActor
+final class CategoryCatalogTests: XCTestCase {
+    override func tearDown() {
+        StatementImporter.saveRules([:])
+        super.tearDown()
+    }
+
+    private func makeContext() throws -> ModelContext {
+        let container = try ModelContainer(
+            for: Institution.self, Asset.self, BalanceSnapshot.self, Movement.self, CashTransaction.self, CustomCategory.self,
+            configurations: ModelConfiguration(UUID().uuidString, isStoredInMemoryOnly: true)
+        )
+        containers.append(container)
+        return ModelContext(container)
+    }
+
+    private var containers: [ModelContainer] = []
+
+    func testCustomCategoriesAndSubcategories() throws {
+        let context = try makeContext()
+        let condominio = CustomCategory(title: "Condomínio", isIncome: false, colorHex: "#0A84FF", parentKey: CashCategory.moradia.rawValue)
+        let filhos = CustomCategory(title: "Filhos", isIncome: false, colorHex: "#123456", parentKey: nil)
+        context.insert(condominio)
+        context.insert(filhos)
+        let escola = CustomCategory(title: "Escola", isIncome: false, colorHex: "#654321", parentKey: filhos.key)
+        context.insert(escola)
+        let catalog = CategoryCatalog(try context.fetch(FetchDescriptor<CustomCategory>()))
+
+        XCTAssertEqual(catalog.label(condominio.key), "Moradia › Condomínio")
+        XCTAssertEqual(catalog.root(escola.key).key, filhos.key)
+        XCTAssertEqual(catalog.lookup(condominio.key).icon, CashCategory.moradia.icon) // herda o ícone da mãe
+        XCTAssertTrue(catalog.contains(condominio.key, in: CashCategory.moradia.rawValue))
+        XCTAssertFalse(catalog.contains(CashCategory.moradia.rawValue, in: condominio.key))
+        let flat = catalog.flat(isIncome: false).map(\.info.key)
+        XCTAssertEqual(flat.firstIndex(of: condominio.key), flat.firstIndex(of: CashCategory.moradia.rawValue).map { $0 + 1 })
+        XCTAssertTrue(catalog.top(isIncome: false).contains { $0.key == filhos.key })
+        XCTAssertFalse(catalog.lookup("desconhecida").isSubcategory)
+
+        // Lançamento numa subcategoria e exclusão movendo para a categoria principal
+        let t = CashTransaction(date: Date(), amount: 800, categoryKey: condominio.key, isIncome: false, note: "Condomínio")
+        context.insert(t)
+        StatementImporter.saveRules(["fulano": condominio.key])
+        let moved = CategoryStore.delete(condominio, moveTo: CashCategory.moradia.rawValue, in: context, catalog: catalog)
+        XCTAssertEqual(moved, 1)
+        XCTAssertEqual(t.categoryRaw, CashCategory.moradia.rawValue)
+        XCTAssertEqual(StatementImporter.loadRules()["fulano"], CashCategory.moradia.rawValue)
+
+        // Excluir a principal leva as subcategorias
+        CategoryStore.delete(filhos, moveTo: CashCategory.educacao.rawValue, in: context, catalog: catalog)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CustomCategory>()).count, 0)
+    }
+
+    func testRememberedRuleCanPointToCustomCategory() throws {
+        let context = try makeContext()
+        let academia = CustomCategory(title: "Academia", isIncome: false, colorHex: "#FF375F", parentKey: CashCategory.saude.rawValue)
+        context.insert(academia)
+        let catalog = CategoryCatalog(try context.fetch(FetchDescriptor<CustomCategory>()))
+        var rows = try StatementImporter.parse(StatementImporterTests.sample).rows
+        let i = try XCTUnwrap(rows.firstIndex { $0.details.hasPrefix("SMARTFIT") })
+        rows[i].categoryKey = academia.key
+        XCTAssertEqual(rows[i].customKey, academia.key)
+        let rules = StatementImporter.learn(from: rows, rules: [:])
+        let again = StatementImporter.prepare(try StatementImporter.parse(StatementImporterTests.sample).rows, rules: rules, existingRefs: [], catalog: catalog)
+        let row = try XCTUnwrap(again.first { $0.details.hasPrefix("SMARTFIT") })
+        XCTAssertEqual(row.categoryKey, academia.key)
+        XCTAssertTrue(row.isRemembered)
+
+        StatementImporter.importRows([row], into: context)
+        let saved = try XCTUnwrap(try context.fetch(FetchDescriptor<CashTransaction>()).first)
+        XCTAssertEqual(catalog.label(saved.categoryRaw), "Saúde › Academia")
+        XCTAssertFalse(saved.isIncome)
+    }
+}

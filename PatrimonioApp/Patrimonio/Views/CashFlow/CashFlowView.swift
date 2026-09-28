@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct CashFlowView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \CashTransaction.date, order: .reverse) private var transactions: [CashTransaction]
+    @Query(sort: \CustomCategory.createdAt) private var customCategories: [CustomCategory]
     @AppStorage("hideValues") private var hideValues = false
     @State private var month = Date().startOfMonth
     @State private var editing: CashTransaction?
@@ -30,8 +31,10 @@ struct CashFlowView: View {
     }
 
     private struct CategorySlice: Identifiable {
-        var id: String { category.rawValue }
-        let category: CashCategory
+        var id: String { info.key }
+        let info: CategoryInfo
+        /// Lançamentos direto na categoria-mãe durante o detalhamento por subcategoria.
+        var isDirect = false
         let value: Double
     }
 
@@ -50,7 +53,18 @@ struct CashFlowView: View {
     }
 
     @State private var typeFilter: TypeFilter = .all
-    @State private var categoryFilter: CashCategory?
+    /// Chave da categoria (ou subcategoria) filtrada.
+    @State private var categoryFilter: String?
+
+    private var catalog: CategoryCatalog { CategoryCatalog(customCategories) }
+    private var selectedInfo: CategoryInfo? { categoryFilter.map { catalog.lookup($0) } }
+
+    /// Categoria principal que está "aberta" nas subcategorias (quando tem subcategorias).
+    private var drillRoot: CategoryInfo? {
+        guard let key = categoryFilter else { return nil }
+        let root = catalog.root(key)
+        return catalog.subcategories(of: root.key).isEmpty ? nil : root
+    }
     @State private var dayFilter: Date?
     @State private var selectedAngle: Double?
 
@@ -59,7 +73,7 @@ struct CashFlowView: View {
     private func matches(_ t: CashTransaction, ignoreDay: Bool = false, ignoreCategory: Bool = false) -> Bool {
         if typeFilter == .income && !t.isIncome { return false }
         if typeFilter == .expense && t.isIncome { return false }
-        if !ignoreCategory, let c = categoryFilter, t.category != c { return false }
+        if !ignoreCategory, let c = categoryFilter, !catalog.contains(t.categoryRaw, in: c) { return false }
         if !ignoreDay, let d = dayFilter, !Calendar.app.isDate(t.date, inSameDayAs: d) { return false }
         return true
     }
@@ -67,12 +81,13 @@ struct CashFlowView: View {
     private func setType(_ type: TypeFilter) {
         withAnimation(.snappy) {
             typeFilter = type
-            if let c = categoryFilter, (type == .income && !c.isIncome) || (type == .expense && c.isIncome) { categoryFilter = nil }
+            if let c = selectedInfo, (type == .income && !c.isIncome) || (type == .expense && c.isIncome) { categoryFilter = nil }
         }
     }
 
-    private func toggleCategory(_ c: CashCategory) {
-        withAnimation(.snappy) { categoryFilter = categoryFilter == c ? nil : c }
+    /// Tocar de novo numa subcategoria volta para a categoria principal.
+    private func toggleCategory(_ key: String) {
+        withAnimation(.snappy) { categoryFilter = categoryFilter == key ? catalog.lookup(key).parentKey : key }
     }
 
     private func toggleDay(_ d: Date) {
@@ -95,7 +110,7 @@ struct CashFlowView: View {
     }
 
     /// A rosca mostra receitas quando o filtro é de receitas (ou a categoria escolhida é de receita).
-    private var donutIsIncome: Bool { typeFilter == .income || (categoryFilter?.isIncome ?? false) }
+    private var donutIsIncome: Bool { typeFilter == .income || (selectedInfo?.isIncome ?? false) }
 
     var body: some View {
         NavigationStack {
@@ -121,13 +136,13 @@ struct CashFlowView: View {
                     .pickerStyle(.segmented)
                     categoryChart(items)
                 } header: {
-                    Text((donutIsIncome ? "Receitas" : "Gastos") + " por categoria" + (dayFilter.map { " · " + Fmt.shortDay.string(from: $0) } ?? ""))
+                    Text((drillRoot.map { $0.title + " por subcategoria" } ?? ((donutIsIncome ? "Receitas" : "Gastos") + " por categoria")) + (dayFilter.map { " · " + Fmt.shortDay.string(from: $0) } ?? ""))
                 }
 
                 Section {
                     historyChart
                 } header: {
-                    Text("Últimos 6 meses" + (categoryFilter.map { " · " + $0.title } ?? ""))
+                    Text("Últimos 6 meses" + (categoryFilter.map { " · " + catalog.label($0) } ?? ""))
                 } footer: {
                     Text("Toque num mês para abri-lo.")
                 }
@@ -135,7 +150,7 @@ struct CashFlowView: View {
                 Section {
                     dailyChart(items)
                 } header: {
-                    Text((categoryFilter?.title ?? (typeFilter == .income ? "Receitas" : "Despesas")) + " por dia")
+                    Text((categoryFilter.map { catalog.label($0) } ?? (typeFilter == .income ? "Receitas" : "Despesas")) + " por dia")
                 } footer: {
                     Text("Toque num dia para ver só os lançamentos dele.")
                 }
@@ -152,8 +167,14 @@ struct CashFlowView: View {
                 ForEach(daySections(filtered)) { section in
                     Section {
                         ForEach(section.items) { t in
-                            TransactionRow(transaction: t, hidden: hideValues, highlighted: categoryFilter == t.category) {
-                                toggleCategory(t.category)
+                            TransactionRow(
+                                transaction: t,
+                                info: catalog.lookup(t.categoryRaw, isIncome: t.isIncome),
+                                label: catalog.label(t.categoryRaw),
+                                hidden: hideValues,
+                                highlighted: categoryFilter == t.categoryRaw
+                            ) {
+                                toggleCategory(t.categoryRaw)
                             }
                             .contentShape(Rectangle())
                             .onTapGesture { editing = t }
@@ -251,8 +272,10 @@ struct CashFlowView: View {
                 if typeFilter != .all {
                     chip(typeFilter.rawValue, color: typeFilter == .income ? .green : .red) { setType(.all) }
                 }
-                if let c = categoryFilter {
-                    chip(c.title, color: c.color) { toggleCategory(c) }
+                if let key = categoryFilter {
+                    chip(catalog.label(key), color: catalog.lookup(key).color) {
+                        withAnimation(.snappy) { categoryFilter = catalog.lookup(key).parentKey }
+                    }
                 }
                 if let d = dayFilter {
                     chip("Dia " + Fmt.shortDay.string(from: d), color: .accentColor) { toggleDay(d) }
@@ -286,12 +309,13 @@ struct CashFlowView: View {
                 summaryTile("Despesas", expense, .red, selected: typeFilter == .expense) { setType(typeFilter == .expense ? .all : .expense) }
                 summaryTile("Saldo", balance, balance >= 0 ? .blue : .red, selected: false) { clearFilters() }
             }
-            if let c = categoryFilter {
-                let value = items.filter { $0.category == c }.reduce(0) { $0 + $1.amount }
+            if let key = categoryFilter {
+                let c = catalog.lookup(key)
+                let value = items.filter { catalog.contains($0.categoryRaw, in: key) }.reduce(0) { $0 + $1.amount }
                 let base = c.isIncome ? income : expense
                 HStack {
                     Image(systemName: c.icon).foregroundStyle(c.color)
-                    Text(c.title).font(.subheadline.weight(.medium))
+                    Text(catalog.label(key)).font(.subheadline.weight(.medium))
                     Spacer()
                     Text(Fmt.currency(value, hidden: hideValues)).font(.subheadline.weight(.semibold)).monospacedDigit()
                     if base > 0 {
@@ -338,9 +362,31 @@ struct CashFlowView: View {
         let source = items.filter { t in
             t.isIncome == donutIsIncome && (dayFilter.map { Calendar.app.isDate(t.date, inSameDayAs: $0) } ?? true)
         }
-        return Dictionary(grouping: source) { $0.category }
-            .map { CategorySlice(category: $0.key, value: $0.value.reduce(0) { $0 + $1.amount }) }
+        let cat = catalog
+        // Detalhamento: só a categoria aberta, separada por subcategoria.
+        if let drill = drillRoot {
+            return Dictionary(grouping: source.filter { cat.contains($0.categoryRaw, in: drill.key) }) { $0.categoryRaw }
+                .map { key, list in
+                    let info = cat.lookup(key)
+                    let direct = key == drill.key
+                    let shown = direct ? CategoryInfo(key: info.key, title: info.title + " (sem subcategoria)", icon: info.icon, colorHex: info.colorHex, isIncome: info.isIncome, parentKey: nil, isBuiltin: info.isBuiltin) : info
+                    return CategorySlice(info: shown, isDirect: direct, value: list.reduce(0) { $0 + $1.amount })
+                }
+                .sorted { $0.value > $1.value }
+        }
+        return Dictionary(grouping: source) { cat.root($0.categoryRaw).key }
+            .map { CategorySlice(info: cat.lookup($0.key), value: $0.value.reduce(0) { $0 + $1.amount }) }
             .sorted { $0.value > $1.value }
+    }
+
+    private func isHighlighted(_ s: CategorySlice) -> Bool {
+        categoryFilter == s.info.key && drillRoot?.key != categoryFilter
+    }
+
+    private func isDimmed(_ s: CategorySlice) -> Bool {
+        guard let key = categoryFilter else { return false }
+        if let drill = drillRoot, key == drill.key { return false } // categoria aberta: nada esmaecido
+        return key != s.info.key
     }
 
     private func categoryChart(_ items: [CashTransaction]) -> some View {
@@ -348,6 +394,17 @@ struct CashFlowView: View {
         let total = data.reduce(0) { $0 + $1.value }
 
         return VStack(spacing: 12) {
+            if let drill = drillRoot {
+                Button {
+                    withAnimation(.snappy) { categoryFilter = nil }
+                } label: {
+                    Label("Voltar para todas as categorias", systemImage: "chevron.left")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHint("Sai do detalhamento de \(drill.title)")
+            }
             if data.isEmpty {
                 Text("Nenhum lançamento " + (donutIsIncome ? "de receita" : "de despesa") + " neste período.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -356,12 +413,12 @@ struct CashFlowView: View {
                     SectorMark(
                         angle: .value("Valor", s.value),
                         innerRadius: .ratio(0.6),
-                        outerRadius: .ratio(categoryFilter == s.category ? 1 : 0.9),
+                        outerRadius: .ratio(isHighlighted(s) ? 1 : 0.9),
                         angularInset: 1.5
                     )
                     .cornerRadius(3)
-                    .foregroundStyle(s.category.color)
-                    .opacity(categoryFilter == nil || categoryFilter == s.category ? 1 : 0.3)
+                    .foregroundStyle(s.info.color)
+                    .opacity(isDimmed(s) ? 0.3 : 1)
                 }
                 .chartAngleSelection(value: $selectedAngle)
                 .onChange(of: selectedAngle) { _, angle in
@@ -370,19 +427,22 @@ struct CashFlowView: View {
                     var acc = 0.0
                     for s in data {
                         acc += s.value
-                        if angle <= acc { toggleCategory(s.category); break }
+                        if angle <= acc { toggleCategory(s.info.key); break }
                     }
                     selectedAngle = nil
                 }
                 .frame(height: 190)
 
                 ForEach(data) { s in
-                    Button { toggleCategory(s.category) } label: {
+                    Button { toggleCategory(s.info.key) } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: s.category.icon)
-                                .foregroundStyle(s.category.color)
+                            Image(systemName: s.info.icon)
+                                .foregroundStyle(s.info.color)
                                 .frame(width: 22)
-                            Text(s.category.title).font(.subheadline).foregroundStyle(.primary)
+                            Text(s.info.title).font(.subheadline).foregroundStyle(.primary)
+                            if drillRoot == nil, !catalog.subcategories(of: s.info.key).isEmpty {
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            }
                             Spacer()
                             Text(Fmt.currency(s.value, hidden: hideValues)).font(.subheadline).monospacedDigit().foregroundStyle(.primary)
                             Text(Fmt.percent(total > 0 ? s.value / total : 0))
@@ -391,8 +451,8 @@ struct CashFlowView: View {
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 6)
-                        .background(categoryFilter == s.category ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                        .opacity(categoryFilter == nil || categoryFilter == s.category ? 1 : 0.45)
+                        .background(isHighlighted(s) ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        .opacity(isDimmed(s) ? 0.45 : 1)
                     }
                     .buttonStyle(.borderless)
                 }
@@ -405,8 +465,8 @@ struct CashFlowView: View {
         let months = (0..<6).reversed().map { month.addingMonths(-$0) }
         let bars = months.flatMap { m -> [MonthBar] in
             let list = transactions.filter { $0.date.isSameMonth(as: m) }
-            if let c = categoryFilter {
-                return [MonthBar(month: m, kind: c.title, value: list.filter { $0.category == c }.reduce(0) { $0 + $1.amount })]
+            if let key = categoryFilter {
+                return [MonthBar(month: m, kind: catalog.label(key), value: list.filter { catalog.contains($0.categoryRaw, in: key) }.reduce(0) { $0 + $1.amount })]
             }
             var out: [MonthBar] = []
             if typeFilter != .expense { out.append(MonthBar(month: m, kind: "Receitas", value: list.filter(\.isIncome).reduce(0) { $0 + $1.amount })) }
@@ -414,7 +474,7 @@ struct CashFlowView: View {
             return out
         }
         var scale: KeyValuePairs<String, Color> = ["Receitas": Color.green, "Despesas": Color.red]
-        if let c = categoryFilter { scale = [c.title: c.color] }
+        if let key = categoryFilter { scale = [catalog.label(key): catalog.lookup(key).color] }
         return Chart(bars) { b in
             BarMark(x: .value("Mês", b.month, unit: .month), y: .value("Valor", b.value))
                 .foregroundStyle(by: .value("Tipo", b.kind))
@@ -458,8 +518,8 @@ struct CashFlowView: View {
     }
 
     private func dailyChart(_ items: [CashTransaction]) -> some View {
-        let showIncome = typeFilter == .income || (categoryFilter?.isIncome ?? false)
-        let color = categoryFilter?.color ?? (showIncome ? Color.green : Color.red)
+        let showIncome = typeFilter == .income || (selectedInfo?.isIncome ?? false)
+        let color = selectedInfo?.color ?? (showIncome ? Color.green : Color.red)
         let source = items.filter { t in
             if categoryFilter == nil && typeFilter == .all { return !t.isIncome }
             return matches(t, ignoreDay: true)
@@ -520,6 +580,8 @@ struct CashFlowView: View {
 
 private struct TransactionRow: View {
     let transaction: CashTransaction
+    let info: CategoryInfo
+    let label: String
     let hidden: Bool
     var highlighted = false
     /// Toque na etiqueta da categoria: filtra o Orçamento por ela.
@@ -527,15 +589,15 @@ private struct TransactionRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            IconBadge(systemName: transaction.category.icon, color: transaction.category.color, size: 32)
+            IconBadge(systemName: info.icon, color: info.color, size: 32)
             VStack(alignment: .leading, spacing: 3) {
-                Text(transaction.note.isEmpty ? transaction.category.title : transaction.note)
+                Text(transaction.note.isEmpty ? label : transaction.note)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                 Button(action: onCategoryTap) {
                     HStack(spacing: 4) {
-                        Circle().fill(transaction.category.color).frame(width: 6, height: 6)
-                        Text(transaction.category.title)
+                        Circle().fill(info.color).frame(width: 6, height: 6)
+                        Text(label)
                     }
                     .font(.caption)
                     .foregroundStyle(highlighted ? Color.accentColor : .secondary)
@@ -558,11 +620,13 @@ private struct TransactionRow: View {
 struct TransactionFormView: View {
     let transaction: CashTransaction?
 
+    @Query(sort: \CustomCategory.createdAt) private var customCategories: [CustomCategory]
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var isIncome: Bool
     @State private var amount = ""
-    @State private var category: CashCategory
+    /// Chave da categoria (padrão ou personalizada).
+    @State private var category: String
     @State private var date: Date
     @State private var note = ""
     @State private var loaded = false
@@ -570,7 +634,7 @@ struct TransactionFormView: View {
     init(transaction: CashTransaction?, isIncome: Bool, defaultDate: Date = Date()) {
         self.transaction = transaction
         _isIncome = State(initialValue: isIncome)
-        _category = State(initialValue: isIncome ? .salario : .mercado)
+        _category = State(initialValue: isIncome ? CashCategory.salario.rawValue : CashCategory.mercado.rawValue)
         _date = State(initialValue: defaultDate)
     }
 
@@ -584,17 +648,15 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: isIncome) { _, income in
-                        if category.isIncome != income { category = income ? .salario : .mercado }
+                        if CategoryCatalog(customCategories).lookup(category).isIncome != income {
+                            category = income ? CashCategory.salario.rawValue : CashCategory.mercado.rawValue
+                        }
                     }
                     CurrencyField("0,00", text: $amount)
                         .font(.title2.weight(.semibold))
                 }
                 Section {
-                    Picker("Categoria", selection: $category) {
-                        ForEach(isIncome ? CashCategory.incomeCases : CashCategory.expenseCases) { c in
-                            Label(c.title, systemImage: c.icon).tag(c)
-                        }
-                    }
+                    CategoryPicker(isIncome: isIncome, selection: $category)
                     DatePicker("Data", selection: $date, displayedComponents: .date)
                     TextField("Descrição", text: $note)
                 }
@@ -621,7 +683,7 @@ struct TransactionFormView: View {
                 loaded = true
                 if let transaction {
                     amount = Fmt.editable(transaction.amount)
-                    category = transaction.category
+                    category = transaction.categoryRaw
                     date = transaction.date
                     note = transaction.note
                 }
@@ -633,11 +695,12 @@ struct TransactionFormView: View {
         guard let value = Fmt.parseNumber(amount), value > 0 else { return }
         if let transaction {
             transaction.amount = abs(value)
-            transaction.category = category
+            transaction.categoryRaw = category
+            transaction.isIncome = isIncome
             transaction.date = date.noon
             transaction.note = note
         } else {
-            context.insert(CashTransaction(date: date.noon, amount: abs(value), category: category, note: note))
+            context.insert(CashTransaction(date: date.noon, amount: abs(value), categoryKey: category, isIncome: isIncome, note: note))
         }
         try? context.save()
         dismiss()

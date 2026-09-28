@@ -14,6 +14,7 @@ struct InvoiceImportView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query private var transactions: [CashTransaction]
+    @Query private var customCategories: [CustomCategory]
     @State private var parsed: InvoiceImporter.Parsed?
     @State private var rows: [InvoiceImporter.Row] = []
     @State private var payments: [PaymentChoice] = []
@@ -103,7 +104,7 @@ struct InvoiceImportView: View {
             let text = try InvoiceImporter.extractText(from: data)
             let p = try InvoiceImporter.parse(text: text)
             let refs = Set(transactions.map(\.ref).filter { !$0.isEmpty })
-            rows = InvoiceImporter.prepare(p.rows, rules: StatementImporter.loadRules(), existingRefs: refs)
+            rows = InvoiceImporter.prepare(p.rows, rules: StatementImporter.loadRules(), existingRefs: refs, catalog: CategoryCatalog(customCategories))
             payments = InvoiceImporter.cardPayments(in: transactions, for: p).map { PaymentChoice(transaction: $0.transaction, remove: $0.suggested) }
             parsed = p
         } catch {
@@ -149,11 +150,7 @@ private struct InvoiceRowView: View {
                     .foregroundStyle(row.isIncome ? Color.green : Color.red)
             }
             if row.include && row.kind == .purchase {
-                Picker("Categoria", selection: $row.category) {
-                    ForEach(CashCategory.expenseCases) { c in
-                        Label(c.title, systemImage: c.icon).tag(c)
-                    }
-                }
+                CategoryPicker(isIncome: false, selection: $row.categoryKey, allowNew: false)
                 .font(.subheadline)
             }
         }
