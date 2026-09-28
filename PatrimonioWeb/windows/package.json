@@ -1,0 +1,42 @@
+{
+  "name": "patrimonio",
+  "productName": "Patrimonio",
+  "version": "1.0.0",
+  "description": "Controle de investimentos e evolução patrimonial",
+  "author": "Patrimônio",
+  "license": "Apache-2.0",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "web": "node ../tools/build.mjs",
+    "start": "npm run web && electron .",
+    "dist": "npm run web && electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "br.com.patrimonio.desktop",
+    "productName": "Patrimonio",
+    "copyright": "Patrimônio",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "web/**/*", "build/icon.png"],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Patrimônio",
+      "uninstallDisplayName": "Patrimônio",
+      "artifactName": "Patrimonio-Instalador-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Patrimonio-Portatil-${version}.exe"
+    }
+  }
+}

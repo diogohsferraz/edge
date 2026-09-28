@@ -1,0 +1,54 @@
+name: Patrimônio web, Apps Script e Windows
+
+on:
+  push:
+    paths:
+      - "PatrimonioWeb/**"
+      - ".github/workflows/patrimonio-web.yml"
+  pull_request:
+    paths:
+      - "PatrimonioWeb/**"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: PatrimonioWeb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Testes (núcleo e Apps Script)
+        run: node --test tests/*.test.js
+      - name: Arquivos gerados estão atualizados
+        run: |
+          node tools/build.mjs
+          git diff --exit-code -- appscript dist || (echo "::error::Rode 'node tools/build.mjs' e faça commit dos arquivos gerados." && exit 1)
+
+  windows:
+    needs: tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: PatrimonioWeb/windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: PatrimonioWeb/windows/package-lock.json
+      - run: npm ci
+      - name: Gerar instalador e versão portátil
+        run: npm run dist -- -c.win.signAndEditExecutable=true
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Patrimonio-Windows
+          path: |
+            PatrimonioWeb/windows/dist/*.exe
+          if-no-files-found: error

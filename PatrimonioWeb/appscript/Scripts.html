@@ -1,0 +1,2734 @@
+<script>
+/* js/util.js */
+/* Utilidades de formatação, datas e números (pt-BR). */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = (P.util = {});
+
+  const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const pctFmt = new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const decFmt = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const MASK = 'R$ •••••';
+
+  U.MASK = MASK;
+
+  U.money = function (v, hidden) {
+    if (hidden) return MASK;
+    return brl.format(v || 0);
+  };
+
+  U.signedMoney = function (v, hidden) {
+    if (hidden) return MASK;
+    v = v || 0;
+    const s = brl.format(Math.abs(v));
+    if (v > 0.004) return '+' + s;
+    if (v < -0.004) return '−' + s;
+    return s;
+  };
+
+  /** "R$ 350 mil", "R$ 1,2 mi" — para eixos de gráficos. */
+  U.compact = function (v) {
+    const a = Math.abs(v || 0);
+    const sign = v < 0 ? '−' : '';
+    const short = (x) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: x < 10 ? 1 : 0 }).format(x);
+    if (a >= 1e6) return sign + 'R$ ' + short(a / 1e6) + ' mi';
+    if (a >= 1e3) return sign + 'R$ ' + short(a / 1e3) + ' mil';
+    return sign + 'R$ ' + short(a);
+  };
+
+  /** `v` em fração (0,05 = 5%). */
+  U.pct = function (v, signed) {
+    if (v === null || v === undefined || !isFinite(v)) return '—';
+    const s = pctFmt.format(v);
+    return signed && v > 0.00005 ? '+' + s : s;
+  };
+
+  /** Número em formato editável: "1.234,56". */
+  U.editable = function (v) {
+    return v === null || v === undefined || v === '' ? '' : decFmt.format(v);
+  };
+
+  /** Converte "R$ 1.234,56", "1234,56", "1,234.56", "-500" em número. */
+  U.parseNumber = function (raw) {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw === 'number') return isFinite(raw) ? raw : null;
+    let s = String(raw).trim();
+    if (!s) return null;
+    let negative = false;
+    if (/^\(.*\)$/.test(s) || s.includes('-') || s.includes('−')) negative = true;
+    s = s.replace(/[^0-9.,]/g, '');
+    if (!s) return null;
+    const lastComma = s.lastIndexOf(',');
+    const lastDot = s.lastIndexOf('.');
+    if (lastComma >= 0 && lastDot >= 0) {
+      s = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+    } else if (lastComma >= 0) {
+      s = s.split(',').length > 2 ? s.replace(/,/g, '') : s.replace(',', '.');
+    } else if (lastDot >= 0) {
+      const parts = s.split('.');
+      if (parts.length > 2 || (parts.length === 2 && parts[1].length === 3)) s = s.replace(/\./g, '');
+    }
+    const v = Number(s);
+    if (!isFinite(v)) return null;
+    return negative ? -v : v;
+  };
+
+  /** Minúsculo, sem acentos e com espaços normalizados. */
+  U.norm = function (s) {
+    return String(s || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ');
+  };
+
+  U.uid = function () {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+  };
+
+  U.escape = function (s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  // ---------- Datas: sempre strings ISO "AAAA-MM-DD" (sem fuso) ----------
+
+  const pad = (n) => String(n).padStart(2, '0');
+
+  U.toISO = function (d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  };
+
+  U.today = function () {
+    return U.toISO(new Date());
+  };
+
+  U.isISO = function (s) {
+    return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  };
+
+  U.monthKey = function (iso) {
+    return String(iso).slice(0, 7);
+  };
+
+  U.addMonths = function (mk, n) {
+    let [y, m] = mk.split('-').map(Number);
+    m += n;
+    y += Math.floor((m - 1) / 12);
+    m = ((((m - 1) % 12) + 12) % 12) + 1;
+    return y + '-' + pad(m);
+  };
+
+  U.daysInMonth = function (mk) {
+    const [y, m] = mk.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  };
+
+  U.monthStart = function (mk) {
+    return mk + '-01';
+  };
+
+  U.monthEnd = function (mk) {
+    return mk + '-' + pad(U.daysInMonth(mk));
+  };
+
+  U.monthRange = function (fromMk, toMk) {
+    const out = [];
+    let m = fromMk;
+    let guard = 0;
+    while (m <= toMk && guard++ < 1200) {
+      out.push(m);
+      m = U.addMonths(m, 1);
+    }
+    return out;
+  };
+
+  U.daysBetween = function (isoA, isoB) {
+    const a = new Date(isoA + 'T12:00:00');
+    const b = new Date(isoB + 'T12:00:00');
+    return Math.round((b - a) / 86400000);
+  };
+
+  U.fmtDate = function (iso) {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return d + '/' + m + '/' + y;
+  };
+
+  U.fmtShortDate = function (iso) {
+    if (!iso) return '';
+    const [, m, d] = iso.split('-');
+    return d + '/' + m;
+  };
+
+  const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const MONTHS_SHORT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  U.MONTHS = MONTHS;
+  U.MONTHS_SHORT = MONTHS_SHORT;
+
+  U.fmtMonth = function (mk) {
+    const [y, m] = mk.split('-').map(Number);
+    return MONTHS_SHORT[m - 1] + '/' + String(y).slice(2);
+  };
+
+  U.fmtMonthLong = function (mk) {
+    const [y, m] = mk.split('-').map(Number);
+    const name = MONTHS[m - 1];
+    return name.charAt(0).toUpperCase() + name.slice(1) + ' de ' + y;
+  };
+
+  U.debounce = function (fn, ms) {
+    let t = null;
+    return function () {
+      const args = arguments;
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(null, args), ms);
+    };
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/model.js */
+/* Catálogos (classes, categorias, bancos) e o armazenamento dos dados. */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+
+  P.ASSET_CLASSES = [
+    { id: 'conta', title: 'Conta e Poupança', color: '#8E8E93', examples: 'Conta remunerada, poupança, caixinhas' },
+    { id: 'rendaFixa', title: 'Renda Fixa', color: '#0A84FF', examples: 'CDB, LCI, LCA, LC, Debêntures, CRI/CRA' },
+    { id: 'tesouro', title: 'Tesouro Direto', color: '#30B0C7', examples: 'Selic, IPCA+, Prefixado' },
+    { id: 'acoes', title: 'Ações', color: '#34C759', examples: 'Ações da B3, ETFs' },
+    { id: 'fiis', title: 'Fundos Imobiliários', color: '#FF9F0A', examples: 'FIIs e Fiagros' },
+    { id: 'fundos', title: 'Fundos de Investimento', color: '#AF52DE', examples: 'Multimercado, DI, Ações' },
+    { id: 'previdencia', title: 'Previdência', color: '#5E5CE6', examples: 'PGBL, VGBL' },
+    { id: 'cripto', title: 'Criptomoedas', color: '#E6B800', examples: 'Bitcoin, Ethereum, stablecoins' },
+    { id: 'exterior', title: 'Exterior', color: '#FF375F', examples: 'Stocks, REITs, BDRs' },
+    { id: 'outros', title: 'Outros', color: '#A2845E', examples: 'Imóveis, COE, outros' },
+  ];
+  P.classById = function (id) {
+    return P.ASSET_CLASSES.find((c) => c.id === id) || P.ASSET_CLASSES[P.ASSET_CLASSES.length - 1];
+  };
+
+  /** Reconhece a classe a partir de texto livre (importação de planilhas). */
+  P.matchClass = function (text) {
+    const t = U.norm(text);
+    if (!t) return 'outros';
+    const exact = P.ASSET_CLASSES.find((c) => c.id === text || U.norm(c.title) === t);
+    if (exact) return exact.id;
+    const rules = [
+      ['tesouro', ['tesouro', 'selic', 'ntn', 'ltn']],
+      ['fiis', ['fii', 'imobiliario', 'fiagro']],
+      ['previdencia', ['previdencia', 'pgbl', 'vgbl']],
+      ['cripto', ['cripto', 'bitcoin', 'btc', 'eth', 'crypto']],
+      ['exterior', ['exterior', 'stock', 'reit', 'internacional', 'dolar', 'usd', 'bdr']],
+      ['fundos', ['fundo', 'multimercado', 'fic', 'fim']],
+      ['rendaFixa', ['renda fixa', 'cdb', 'lci', 'lca', 'debenture', 'cri', 'cra', 'rdb']],
+      ['acoes', ['acao', 'acoes', 'etf', 'bolsa', 'renda variavel']],
+      ['conta', ['conta', 'poupanca', 'caixinha', 'saldo', 'cofrinho']],
+    ];
+    for (const [id, keys] of rules) {
+      if (keys.some((k) => t.includes(k))) return id;
+    }
+    return 'outros';
+  };
+
+  P.MOVEMENT_KINDS = [
+    { id: 'aporte', title: 'Aporte', color: '#34C759', flowSign: 1, investedSign: 1 },
+    { id: 'resgate', title: 'Resgate', color: '#FF3B30', flowSign: -1, investedSign: -1 },
+    { id: 'provento', title: 'Provento', color: '#FF9F0A', flowSign: -1, investedSign: 0 },
+  ];
+  P.kindById = function (id) {
+    return P.MOVEMENT_KINDS.find((k) => k.id === id) || P.MOVEMENT_KINDS[0];
+  };
+
+  P.CASH_CATEGORIES = [
+    { id: 'salario', title: 'Salário', income: true, color: '#34C759' },
+    { id: 'freelance', title: 'Freelance / Extra', income: true, color: '#30D158' },
+    { id: 'rendimentos', title: 'Rendimentos', income: true, color: '#00C7BE' },
+    { id: 'outrasReceitas', title: 'Outras receitas', income: true, color: '#64D2FF' },
+    { id: 'moradia', title: 'Moradia', income: false, color: '#0A84FF' },
+    { id: 'mercado', title: 'Mercado', income: false, color: '#FF9F0A' },
+    { id: 'alimentacao', title: 'Restaurantes', income: false, color: '#FF6B35' },
+    { id: 'transporte', title: 'Transporte', income: false, color: '#5E5CE6' },
+    { id: 'saude', title: 'Saúde', income: false, color: '#FF375F' },
+    { id: 'educacao', title: 'Educação', income: false, color: '#BF5AF2' },
+    { id: 'lazer', title: 'Lazer', income: false, color: '#E6B800' },
+    { id: 'compras', title: 'Compras', income: false, color: '#FF2D55' },
+    { id: 'assinaturas', title: 'Assinaturas', income: false, color: '#AC8E68' },
+    { id: 'contas', title: 'Contas da casa', income: false, color: '#30B0C7' },
+    { id: 'viagem', title: 'Viagem', income: false, color: '#66D4CF' },
+    { id: 'impostos', title: 'Impostos e taxas', income: false, color: '#8E8E93' },
+    { id: 'pets', title: 'Pets', income: false, color: '#A2845E' },
+    { id: 'outrosGastos', title: 'Outros gastos', income: false, color: '#636366' },
+  ];
+  P.categoryById = function (id) {
+    return P.CASH_CATEGORIES.find((c) => c.id === id) || P.CASH_CATEGORIES[P.CASH_CATEGORIES.length - 1];
+  };
+
+  P.INSTITUTION_PRESETS = [
+    ['Nubank', '#820AD1'], ['Itaú', '#EC7000'], ['Bradesco', '#CC092F'], ['Banco do Brasil', '#D4A900'],
+    ['Caixa', '#005CA9'], ['Santander', '#EC0000'], ['Inter', '#FF7A00'], ['C6 Bank', '#3A3A3C'],
+    ['XP Investimentos', '#1C1C1E'], ['BTG Pactual', '#0D2B5C'], ['Rico', '#FF5A00'], ['Clear', '#00A3E0'],
+    ['NuInvest', '#9B4DCA'], ['Mercado Pago', '#00B1EA'], ['PicPay', '#21C25E'], ['Sicredi', '#3FA110'],
+    ['Sicoob', '#003641'], ['Banco Pan', '#00AEEF'], ['Órama', '#1E9E8A'], ['Warren', '#E02B57'],
+    ['Avenue', '#1D3CB5'], ['Binance', '#D4A20B'], ['Tesouro Direto', '#2E7D32'],
+  ].map(([name, color]) => ({ name, color }));
+
+  P.PALETTE = ['#5E5CE6', '#0A84FF', '#30B0C7', '#34C759', '#FF9F0A', '#FF375F', '#AF52DE', '#A2845E'];
+
+  // ---------------------------------------------------------------------
+  // Armazenamento
+  // ---------------------------------------------------------------------
+
+  P.emptyData = function () {
+    return {
+      version: 1,
+      institutions: [],
+      assets: [],
+      snapshots: [],
+      movements: [],
+      transactions: [],
+      settings: { goal: 0, hideValues: false },
+      benchmarks: { cdi: {}, ipca: {}, updated: null },
+    };
+  };
+
+  /** Garante a estrutura esperada (dados antigos, importados ou vindos da planilha). */
+  P.normalizeData = function (raw) {
+    const d = P.emptyData();
+    if (!raw || typeof raw !== 'object') return d;
+    const num = (v) => U.parseNumber(v) || 0;
+    const str = (v) => (v === null || v === undefined ? '' : String(v));
+    const date = (v) => (U.isISO(str(v).slice(0, 10)) ? str(v).slice(0, 10) : null);
+
+    d.institutions = (raw.institutions || [])
+      .filter((i) => i && i.id)
+      .map((i) => ({ id: str(i.id), name: str(i.name) || 'Sem nome', color: str(i.color) || '#8E8E93' }));
+    d.assets = (raw.assets || [])
+      .filter((a) => a && a.id)
+      .map((a) => ({
+        id: str(a.id),
+        name: str(a.name) || 'Sem nome',
+        classId: P.ASSET_CLASSES.some((c) => c.id === a.classId) ? a.classId : 'outros',
+        institutionId: str(a.institutionId),
+        ticker: str(a.ticker),
+        indexer: str(a.indexer),
+        maturity: date(a.maturity),
+        notes: str(a.notes),
+        archived: a.archived === true || a.archived === 'TRUE' || a.archived === 'true',
+        createdAt: date(a.createdAt) || U.today(),
+      }));
+    d.snapshots = (raw.snapshots || [])
+      .filter((s) => s && s.id && date(s.date))
+      .map((s) => ({ id: str(s.id), assetId: str(s.assetId), date: date(s.date), value: num(s.value) }));
+    d.movements = (raw.movements || [])
+      .filter((m) => m && m.id && date(m.date))
+      .map((m) => ({
+        id: str(m.id),
+        assetId: str(m.assetId),
+        date: date(m.date),
+        kind: P.MOVEMENT_KINDS.some((k) => k.id === m.kind) ? m.kind : 'aporte',
+        amount: Math.abs(num(m.amount)),
+        note: str(m.note),
+      }));
+    d.transactions = (raw.transactions || [])
+      .filter((t) => t && t.id && date(t.date))
+      .map((t) => {
+        const cat = P.categoryById(t.category);
+        return { id: str(t.id), date: date(t.date), amount: Math.abs(num(t.amount)), category: cat.id, income: cat.income, note: str(t.note) };
+      });
+    const s = raw.settings || {};
+    d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true' };
+    const b = raw.benchmarks || {};
+    d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
+    return d;
+  };
+
+  /**
+   * Cria o repositório de dados. `backend` precisa ter:
+   *   load(): Promise<objeto|null>
+   *   save(objeto): Promise
+   *   fetchSeries(codigo): Promise<[{data, valor}]>   (opcional)
+   */
+  P.createStore = function (backend) {
+    let data = P.emptyData();
+    const listeners = [];
+    let status = 'idle';
+    let pending = null;
+
+    const store = {
+      backend,
+      get data() {
+        return data;
+      },
+      get status() {
+        return status;
+      },
+      onChange(fn) {
+        listeners.push(fn);
+      },
+      async load() {
+        const raw = await backend.load();
+        data = P.normalizeData(raw);
+        emit();
+      },
+      commit() {
+        emit();
+        scheduleSave();
+      },
+      replaceAll(newData) {
+        data = P.normalizeData(newData);
+        store.commit();
+      },
+      wipe() {
+        const benchmarks = data.benchmarks;
+        data = P.emptyData();
+        data.benchmarks = benchmarks;
+        store.commit();
+      },
+      async flush() {
+        if (pending) {
+          clearTimeout(pending);
+          pending = null;
+          await doSave();
+        }
+      },
+
+      // ---- Instituições ----
+      institution(id) {
+        return data.institutions.find((i) => i.id === id) || null;
+      },
+      saveInstitution(inst) {
+        if (inst.id) {
+          Object.assign(store.institution(inst.id) || {}, inst);
+        } else {
+          inst.id = U.uid();
+          data.institutions.push(inst);
+        }
+        store.commit();
+        return inst;
+      },
+      findOrCreateInstitution(name, autoCommit) {
+        const label = String(name || '').trim() || 'Sem instituição';
+        const key = U.norm(label);
+        let inst = data.institutions.find((i) => U.norm(i.name) === key);
+        if (inst) return { inst, created: false };
+        const preset = P.INSTITUTION_PRESETS.find((p) => U.norm(p.name) === key);
+        inst = { id: U.uid(), name: label, color: preset ? preset.color : P.PALETTE[data.institutions.length % P.PALETTE.length] };
+        data.institutions.push(inst);
+        if (autoCommit !== false) store.commit();
+        return { inst, created: true };
+      },
+      deleteInstitution(id) {
+        const assetIds = data.assets.filter((a) => a.institutionId === id).map((a) => a.id);
+        assetIds.forEach((aid) => removeAsset(aid));
+        data.institutions = data.institutions.filter((i) => i.id !== id);
+        store.commit();
+      },
+
+      // ---- Ativos ----
+      asset(id) {
+        return data.assets.find((a) => a.id === id) || null;
+      },
+      saveAsset(asset, initialValue, initialDate, autoCommit) {
+        if (asset.id && store.asset(asset.id)) {
+          Object.assign(store.asset(asset.id), asset);
+        } else {
+          asset.id = U.uid();
+          asset.createdAt = asset.createdAt || U.today();
+          asset.archived = !!asset.archived;
+          data.assets.push(asset);
+          if (initialValue && initialValue > 0) {
+            const d = initialDate || U.today();
+            store.recordBalance(asset.id, d, initialValue, false);
+            store.recordMovement(asset.id, 'aporte', initialValue, d, 'Posição inicial', false);
+          }
+        }
+        if (autoCommit !== false) store.commit();
+        return asset;
+      },
+      deleteAsset(id) {
+        removeAsset(id);
+        store.commit();
+      },
+      snapshotsOf(assetId) {
+        return data.snapshots.filter((s) => s.assetId === assetId).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      },
+      movementsOf(assetId) {
+        return data.movements.filter((m) => m.assetId === assetId).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      },
+      currentValue(assetId) {
+        const s = store.snapshotsOf(assetId);
+        return s.length ? s[s.length - 1].value : 0;
+      },
+      lastUpdate(assetId) {
+        const s = store.snapshotsOf(assetId);
+        return s.length ? s[s.length - 1].date : null;
+      },
+      invested(assetId) {
+        return store.movementsOf(assetId).reduce((acc, m) => acc + m.amount * P.kindById(m.kind).investedSign, 0);
+      },
+      proventos(assetId) {
+        return store.movementsOf(assetId).filter((m) => m.kind === 'provento').reduce((acc, m) => acc + m.amount, 0);
+      },
+      gain(assetId) {
+        return store.currentValue(assetId) - store.invested(assetId) + store.proventos(assetId);
+      },
+
+      /** Registra o saldo do dia (substitui se já houver saldo na mesma data). */
+      recordBalance(assetId, date, value, autoCommit) {
+        const existing = data.snapshots.find((s) => s.assetId === assetId && s.date === date);
+        if (existing) existing.value = value;
+        else data.snapshots.push({ id: U.uid(), assetId, date, value });
+        if (autoCommit !== false) store.commit();
+      },
+      recordMovement(assetId, kind, amount, date, note, autoCommit) {
+        if (!(amount > 0)) return;
+        data.movements.push({ id: U.uid(), assetId, date, kind, amount, note: note || '' });
+        if (autoCommit !== false) store.commit();
+      },
+      deleteSnapshot(id) {
+        data.snapshots = data.snapshots.filter((s) => s.id !== id);
+        store.commit();
+      },
+      deleteMovement(id) {
+        data.movements = data.movements.filter((m) => m.id !== id);
+        store.commit();
+      },
+
+      // ---- Orçamento ----
+      saveTransaction(t) {
+        const cat = P.categoryById(t.category);
+        t.income = cat.income;
+        if (t.id) {
+          Object.assign(data.transactions.find((x) => x.id === t.id) || {}, t);
+        } else {
+          t.id = U.uid();
+          data.transactions.push(t);
+        }
+        store.commit();
+      },
+      deleteTransaction(id) {
+        data.transactions = data.transactions.filter((t) => t.id !== id);
+        store.commit();
+      },
+
+      // ---- Preferências ----
+      setSetting(key, value) {
+        data.settings[key] = value;
+        store.commit();
+      },
+      setBenchmarks(cdi, ipca) {
+        data.benchmarks = { cdi, ipca, updated: new Date().toISOString() };
+        store.commit();
+      },
+    };
+
+    function removeAsset(id) {
+      data.assets = data.assets.filter((a) => a.id !== id);
+      data.snapshots = data.snapshots.filter((s) => s.assetId !== id);
+      data.movements = data.movements.filter((m) => m.assetId !== id);
+    }
+
+    function emit() {
+      listeners.forEach((fn) => {
+        try {
+          fn(data, status);
+        } catch (e) {
+          console.error(e);
+        }
+      });
+    }
+
+    function setStatus(s) {
+      status = s;
+      listeners.forEach((fn) => {
+        try {
+          fn(data, status, true);
+        } catch (e) {
+          console.error(e);
+        }
+      });
+    }
+
+    function scheduleSave() {
+      setStatus('pending');
+      clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        doSave();
+      }, 700);
+    }
+
+    async function doSave() {
+      setStatus('saving');
+      try {
+        await backend.save(data);
+        setStatus('saved');
+      } catch (e) {
+        console.error(e);
+        setStatus('error');
+      }
+    }
+
+    return store;
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/analytics.js */
+/* Cálculos da carteira: evolução, rentabilidade (Modified Dietz), alocação. */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+
+  /**
+   * @param {object} data  dados normalizados (P.normalizeData)
+   * @param {string} [today] data ISO de referência (padrão: hoje)
+   */
+  function Analytics(data, today) {
+    this.today = today || U.today();
+    const instById = {};
+    data.institutions.forEach((i) => (instById[i.id] = i));
+    const byAsset = {};
+    data.assets.forEach((a) => {
+      const inst = instById[a.institutionId];
+      byAsset[a.id] = {
+        id: a.id,
+        name: a.name,
+        classId: a.classId,
+        archived: a.archived,
+        institutionId: a.institutionId,
+        institutionName: inst ? inst.name : 'Sem instituição',
+        institutionColor: inst ? inst.color : '#8E8E93',
+        snaps: [],
+        flows: [],
+      };
+    });
+    data.snapshots.forEach((s) => byAsset[s.assetId] && byAsset[s.assetId].snaps.push(s));
+    data.movements.forEach((m) => byAsset[m.assetId] && byAsset[m.assetId].flows.push(m));
+    const cmp = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    this.assets = Object.values(byAsset);
+    this.assets.forEach((a) => {
+      a.snaps.sort(cmp);
+      a.flows.sort(cmp);
+    });
+  }
+
+  /** Saldo do ativo na data (último saldo informado até ela, inclusive). */
+  Analytics.prototype.valueOf = function (asset, iso) {
+    let v = 0;
+    for (const s of asset.snaps) {
+      if (s.date <= iso) v = s.value;
+      else break;
+    }
+    return v;
+  };
+
+  Analytics.prototype.total = function (iso) {
+    iso = iso || this.today;
+    return this.assets.reduce((acc, a) => acc + this.valueOf(a, iso), 0);
+  };
+
+  Analytics.prototype.invested = function (iso) {
+    iso = iso || this.today;
+    let v = 0;
+    this.assets.forEach((a) =>
+      a.flows.forEach((f) => {
+        if (f.date <= iso) v += f.amount * P.kindById(f.kind).investedSign;
+      })
+    );
+    return v;
+  };
+
+  Analytics.prototype.proventos = function (fromIso, toIso) {
+    fromIso = fromIso || '0000-00-00';
+    toIso = toIso || this.today;
+    let v = 0;
+    this.assets.forEach((a) =>
+      a.flows.forEach((f) => {
+        if (f.kind === 'provento' && f.date >= fromIso && f.date <= toIso) v += f.amount;
+      })
+    );
+    return v;
+  };
+
+  Analytics.prototype.firstDate = function () {
+    let first = null;
+    this.assets.forEach((a) => {
+      a.snaps.concat(a.flows).forEach((x) => {
+        if (!first || x.date < first) first = x.date;
+      });
+    });
+    return first;
+  };
+
+  /** Meses exibidos: os `limit` últimos (ou todos) desde o primeiro registro. */
+  Analytics.prototype.months = function (limit) {
+    const first = this.firstDate();
+    if (!first) return [];
+    const all = U.monthRange(U.monthKey(first), U.monthKey(this.today));
+    return limit && all.length > limit ? all.slice(all.length - limit) : all;
+  };
+
+  Analytics.prototype.cutoff = function (mk) {
+    const end = U.monthEnd(mk);
+    return end < this.today ? end : this.today;
+  };
+
+  Analytics.prototype.evolution = function (limit) {
+    return this.months(limit).map((mk) => {
+      const cut = this.cutoff(mk);
+      const byClass = {};
+      let total = 0;
+      this.assets.forEach((a) => {
+        const v = this.valueOf(a, cut);
+        total += v;
+        byClass[a.classId] = (byClass[a.classId] || 0) + v;
+      });
+      return { month: mk, total, invested: this.invested(cut), byClass };
+    });
+  };
+
+  Analytics.prototype.performanceFor = function (mk) {
+    const start = U.monthStart(mk);
+    const prevEnd = U.monthEnd(U.addMonths(mk, -1));
+    const cut = this.cutoff(mk);
+    const startValue = this.total(prevEnd);
+    const endValue = this.total(cut);
+    const dim = U.daysInMonth(mk);
+    let aportes = 0, resgates = 0, proventos = 0, netFlow = 0, weighted = 0;
+    this.assets.forEach((a) =>
+      a.flows.forEach((f) => {
+        if (f.date < start || f.date > U.monthEnd(mk)) return;
+        if (f.kind === 'aporte') aportes += f.amount;
+        else if (f.kind === 'resgate') resgates += f.amount;
+        else proventos += f.amount;
+        const signed = f.amount * P.kindById(f.kind).flowSign;
+        netFlow += signed;
+        const day = Number(f.date.slice(8, 10));
+        // Fração do mês em que o dinheiro ficou aplicado.
+        const w = Math.max(0, Math.min(1, (dim - day + 0.5) / dim));
+        weighted += signed * w;
+      })
+    );
+    const gain = endValue - startValue - netFlow;
+    const base = startValue + weighted;
+    return {
+      month: mk,
+      startValue,
+      endValue,
+      aportes,
+      resgates,
+      proventos,
+      netContribution: aportes - resgates,
+      gain,
+      rate: base > 0.01 ? gain / base : null,
+    };
+  };
+
+  Analytics.prototype.performance = function (limit) {
+    return this.months(limit).map((mk) => this.performanceFor(mk));
+  };
+
+  /** Rentabilidade acumulada (composta). `rates`: [{month, rate}] */
+  Analytics.cumulative = function (rates) {
+    let acc = 1;
+    const out = [];
+    rates.forEach((r) => {
+      if (r.rate === null || r.rate === undefined) return;
+      acc *= 1 + r.rate;
+      out.push({ month: r.month, value: acc - 1 });
+    });
+    return out;
+  };
+
+  function slices(map) {
+    const list = Object.values(map).filter((s) => s.value > 0.004);
+    const total = list.reduce((acc, s) => acc + s.value, 0);
+    if (!total) return [];
+    return list.map((s) => Object.assign(s, { share: s.value / total })).sort((a, b) => b.value - a.value);
+  }
+
+  Analytics.prototype.allocationByClass = function (iso) {
+    iso = iso || this.today;
+    const map = {};
+    this.assets.forEach((a) => {
+      const c = P.classById(a.classId);
+      map[c.id] = map[c.id] || { key: c.id, label: c.title, color: c.color, value: 0 };
+      map[c.id].value += this.valueOf(a, iso);
+    });
+    return slices(map);
+  };
+
+  Analytics.prototype.allocationByInstitution = function (iso) {
+    iso = iso || this.today;
+    const map = {};
+    this.assets.forEach((a) => {
+      const k = a.institutionId || '_';
+      map[k] = map[k] || { key: k, label: a.institutionName, color: a.institutionColor, value: 0 };
+      map[k].value += this.valueOf(a, iso);
+    });
+    return slices(map);
+  };
+
+  /** Meses estimados para atingir a meta. */
+  Analytics.monthsToReach = function (goal, current, monthly, rate, max) {
+    max = max || 600;
+    if (current >= goal) return 0;
+    let v = current;
+    for (let m = 1; m <= max; m++) {
+      v = v * (1 + rate) + monthly;
+      if (v >= goal) return m;
+    }
+    return null;
+  };
+
+  P.Analytics = Analytics;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/csv.js */
+/* Importação e exportação de planilhas CSV (Excel / Google Planilhas). */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+  const CSV = (P.csv = {});
+
+  CSV.detectDelimiter = function (line) {
+    const counts = [';', '\t', ','].map((d) => [d, line.split(d).length - 1]);
+    counts.sort((a, b) => b[1] - a[1]);
+    return counts[0][1] > 0 ? counts[0][0] : ';';
+  };
+
+  /** Parser CSV com suporte a campos entre aspas. */
+  CSV.parse = function (text) {
+    text = String(text || '').replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+    const firstLine = text.split('\n').find((l) => l.trim()) || '';
+    const delim = CSV.detectDelimiter(firstLine);
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    const src = text + '\n';
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (src[i + 1] === '"') {
+            field += '"';
+            i++;
+          } else inQuotes = false;
+        } else field += ch;
+      } else if (ch === '"') inQuotes = true;
+      else if (ch === delim) {
+        row.push(field.trim());
+        field = '';
+      } else if (ch === '\n') {
+        row.push(field.trim());
+        field = '';
+        if (row.some((c) => c !== '')) rows.push(row);
+        row = [];
+      } else field += ch;
+    }
+    return rows;
+  };
+
+  /** "31/01/2026", "2026-01-31", "31/01/26" → "2026-01-31". */
+  CSV.parseDate = function (raw) {
+    const s = String(raw || '').trim();
+    let m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return valid(+m[1], +m[2], +m[3]);
+    if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/))) {
+      let y = +m[3];
+      if (y < 100) y += 2000;
+      return valid(y, +m[2], +m[1]);
+    }
+    return null;
+  };
+
+  function valid(y, mo, d) {
+    if (mo < 1 || mo > 12 || d < 1) return null;
+    const mk = y + '-' + String(mo).padStart(2, '0');
+    if (d > U.daysInMonth(mk)) return null;
+    return mk + '-' + String(d).padStart(2, '0');
+  }
+
+  const MONTH_NAMES = U.MONTHS.map(U.norm);
+
+  /** Cabeçalho de mês: "01/2026", "jan/26", "Janeiro 2026", "2026-01" → último dia do mês. */
+  CSV.parseMonthHeader = function (raw) {
+    const s = U.norm(raw).replace(/\./g, '').replace(/ de /g, ' ');
+    if (!s) return null;
+    const full = CSV.parseDate(s);
+    if (full) return full;
+    let m, y, mo;
+    if ((m = s.match(/^(\d{1,2})[/-](\d{2}|\d{4})$/))) {
+      mo = +m[1];
+      y = +m[2];
+    } else if ((m = s.match(/^(\d{4})[/-](\d{1,2})$/))) {
+      y = +m[1];
+      mo = +m[2];
+    } else if ((m = s.match(/^([a-zç]+)[/ -]?(\d{2}|\d{4})$/))) {
+      const name = m[1];
+      const idx = MONTH_NAMES.findIndex((n) => n === name || n.slice(0, 3) === name.slice(0, 3));
+      if (idx < 0 || name.length < 3) return null;
+      mo = idx + 1;
+      y = +m[2];
+    } else return null;
+    if (y < 100) y += 2000;
+    if (mo < 1 || mo > 12) return null;
+    return U.monthEnd(y + '-' + String(mo).padStart(2, '0'));
+  };
+
+  const ALIASES = {
+    date: ['data', 'date', 'dia'],
+    institution: ['instituicao', 'banco', 'corretora', 'local', 'conta'],
+    asset: ['ativo', 'investimento', 'nome', 'produto', 'aplicacao', 'descricao'],
+    assetClass: ['classe', 'tipo', 'categoria', 'classe de ativo'],
+    balance: ['saldo', 'valor', 'valor atual', 'saldo atual', 'patrimonio', 'posicao'],
+    aporte: ['aporte', 'aportes', 'aplicado', 'deposito'],
+    resgate: ['resgate', 'resgates', 'retirada', 'saque'],
+    provento: ['proventos', 'provento', 'dividendos', 'rendimentos pagos', 'juros recebidos'],
+    ticker: ['ticker', 'codigo'],
+  };
+
+  function columnFor(header) {
+    const k = U.norm(header);
+    for (const col in ALIASES) if (ALIASES[col].includes(k)) return col;
+    return null;
+  }
+
+  /**
+   * Importa o texto CSV para o store. Aceita:
+   *  1. linhas: data;instituicao;ativo;classe;saldo;aporte;resgate;proventos
+   *  2. colunas por mês: instituicao;ativo;classe;01/2026;02/2026;...
+   */
+  CSV.importInto = function (store, text) {
+    const rows = CSV.parse(text);
+    if (rows.length < 2) throw new Error('O arquivo está vazio ou só tem cabeçalho.');
+    const header = rows[0];
+    const map = {};
+    const monthCols = [];
+    header.forEach((h, i) => {
+      const col = columnFor(h);
+      if (col && map[col] === undefined) map[col] = i;
+      else {
+        const m = CSV.parseMonthHeader(h);
+        if (m) monthCols.push([i, m]);
+      }
+    });
+    if (map.asset === undefined) throw new Error('Não encontrei a coluna "ativo" (nome do investimento).');
+    if (map.date === undefined && !monthCols.length) {
+      throw new Error('Inclua uma coluna "data" ou colunas com meses (ex.: 01/2026).');
+    }
+
+    const data = store.data;
+    const summary = { institutionsCreated: 0, assetsCreated: 0, balances: 0, movements: 0, skipped: 0 };
+    const cache = {};
+    const touched = new Set();
+    const cell = (row, col) => (map[col] !== undefined && map[col] < row.length ? row[map[col]] : '');
+
+    function resolveAsset(row) {
+      const name = (row[map.asset] || '').trim();
+      if (!name) return null;
+      const instName = cell(row, 'institution').trim() || 'Sem instituição';
+      const key = U.norm(instName) + '|' + U.norm(name);
+      if (cache[key]) return cache[key];
+      const r = store.findOrCreateInstitution(instName, false);
+      if (r.created) summary.institutionsCreated++;
+      let asset = data.assets.find((a) => a.institutionId === r.inst.id && U.norm(a.name) === U.norm(name));
+      if (!asset) {
+        const clsText = cell(row, 'assetClass');
+        asset = store.saveAsset(
+          { name, classId: P.matchClass(clsText || name), institutionId: r.inst.id, ticker: cell(row, 'ticker'), indexer: '', maturity: null, notes: '' },
+          0,
+          null,
+          false
+        );
+        summary.assetsCreated++;
+      }
+      cache[key] = asset;
+      return asset;
+    }
+
+    if (map.date === undefined) {
+      rows.slice(1).forEach((row) => {
+        const asset = resolveAsset(row);
+        if (!asset) return summary.skipped++;
+        touched.add(asset.id);
+        monthCols.forEach(([i, iso]) => {
+          const v = U.parseNumber(row[i]);
+          if (v === null) return;
+          store.recordBalance(asset.id, iso, v, false);
+          summary.balances++;
+        });
+      });
+    } else {
+      rows.slice(1).forEach((row) => {
+        const date = CSV.parseDate(cell(row, 'date'));
+        const asset = date && resolveAsset(row);
+        if (!asset) return summary.skipped++;
+        touched.add(asset.id);
+        const bal = U.parseNumber(cell(row, 'balance'));
+        if (bal !== null) {
+          store.recordBalance(asset.id, date, bal, false);
+          summary.balances++;
+        }
+        const ap = U.parseNumber(cell(row, 'aporte'));
+        if (ap) {
+          store.recordMovement(asset.id, ap > 0 ? 'aporte' : 'resgate', Math.abs(ap), date, '', false);
+          summary.movements++;
+        }
+        const rs = U.parseNumber(cell(row, 'resgate'));
+        if (rs) {
+          store.recordMovement(asset.id, 'resgate', Math.abs(rs), date, '', false);
+          summary.movements++;
+        }
+        const pv = U.parseNumber(cell(row, 'provento'));
+        if (pv) {
+          store.recordMovement(asset.id, 'provento', Math.abs(pv), date, '', false);
+          summary.movements++;
+        }
+      });
+    }
+
+    // Sem aportes registrados: o primeiro saldo vira a posição inicial.
+    touched.forEach((id) => {
+      if (store.movementsOf(id).length) return;
+      const first = store.snapshotsOf(id)[0];
+      if (first && first.value > 0) {
+        store.recordMovement(id, 'aporte', first.value, first.date, 'Posição inicial (importação)', false);
+        summary.movements++;
+      }
+    });
+
+    store.commit();
+    return summary;
+  };
+
+  CSV.describe = function (s) {
+    let t = 'Importados: ' + s.balances + ' saldos, ' + s.movements + ' movimentações';
+    if (s.assetsCreated) t += ', ' + s.assetsCreated + ' investimentos novos';
+    if (s.institutionsCreated) t += ', ' + s.institutionsCreated + ' instituições novas';
+    t += '.';
+    if (s.skipped) t += ' ' + s.skipped + ' linha(s) ignorada(s).';
+    return t;
+  };
+
+  function esc(s) {
+    s = String(s === null || s === undefined ? '' : s);
+    return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  const num = (v) => U.editable(v).replace(/\./g, '');
+
+  CSV.exportPortfolio = function (store) {
+    const data = store.data;
+    const out = ['data;instituicao;ativo;classe;saldo;aporte;resgate;proventos'];
+    const instName = (id) => (store.institution(id) || { name: 'Sem instituição' }).name;
+    const assets = data.assets.slice().sort((a, b) => (instName(a.institutionId) + a.name).localeCompare(instName(b.institutionId) + b.name));
+    assets.forEach((a) => {
+      const lines = {};
+      const line = (d) => (lines[d] = lines[d] || { balance: null, aporte: 0, resgate: 0, provento: 0 });
+      store.snapshotsOf(a.id).forEach((s) => (line(s.date).balance = s.value));
+      store.movementsOf(a.id).forEach((m) => (line(m.date)[m.kind] += m.amount));
+      Object.keys(lines)
+        .sort()
+        .forEach((d) => {
+          const l = lines[d];
+          out.push(
+            [
+              U.fmtDate(d),
+              instName(a.institutionId),
+              a.name,
+              P.classById(a.classId).title,
+              l.balance === null ? '' : num(l.balance),
+              l.aporte ? num(l.aporte) : '',
+              l.resgate ? num(l.resgate) : '',
+              l.provento ? num(l.provento) : '',
+            ]
+              .map(esc)
+              .join(';')
+          );
+        });
+    });
+    return out.join('\n');
+  };
+
+  CSV.exportTransactions = function (store) {
+    const out = ['data;tipo;categoria;valor;descricao'];
+    store.data.transactions
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .forEach((t) => {
+        out.push([U.fmtDate(t.date), t.income ? 'Receita' : 'Despesa', P.categoryById(t.category).title, num(t.amount), t.note].map(esc).join(';'));
+      });
+    return out.join('\n');
+  };
+
+  CSV.TEMPLATE_ROWS = [
+    'data;instituicao;ativo;classe;saldo;aporte;resgate;proventos',
+    '31/01/2026;Nubank;Caixinha Reserva;Conta e Poupança;10.000,00;10.000,00;;',
+    '31/01/2026;XP Investimentos;CDB 110% CDI;Renda Fixa;25.000,00;25.000,00;;',
+    '28/02/2026;Nubank;Caixinha Reserva;Conta e Poupança;10.500,00;400,00;;',
+    '28/02/2026;XP Investimentos;CDB 110% CDI;Renda Fixa;25.260,00;;;',
+  ].join('\n');
+
+  CSV.TEMPLATE_MONTHS = [
+    'instituicao;ativo;classe;01/2026;02/2026;03/2026',
+    'Nubank;Caixinha;Conta;10.000;10.450;10.980',
+    'XP;CDB 110% CDI;Renda Fixa;25.000;25.260;25.530',
+    'XP;Tesouro IPCA+ 2035;Tesouro;8.000;8.120;8.090',
+  ].join('\n');
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/sample.js */
+/* Carteira de exemplo com 18 meses de histórico. */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+
+  P.loadSampleData = function (store, months) {
+    months = months || 18;
+    let seed = 42;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const range = (lo, hi) => lo + (hi - lo) * rnd();
+    const today = U.today();
+    const nowMk = U.monthKey(today);
+    const startMk = U.addMonths(nowMk, -(months - 1));
+    const inst = (name) => store.findOrCreateInstitution(name, false).inst.id;
+    const nubank = inst('Nubank'), xp = inst('XP Investimentos'), inter = inst('Inter'), btg = inst('BTG Pactual');
+
+    const specs = [
+      ['Caixinha Reserva', 'conta', nubank, 8000, 300, 0.0085, 0.0005, '100% CDI', '', 0],
+      ['CDB Liquidez Diária', 'rendaFixa', inter, 12000, 0, 0.009, 0.0005, '102% CDI', '', 0],
+      ['LCI 95% CDI 2027', 'rendaFixa', xp, 20000, 0, 0.0088, 0.0003, '95% CDI', '', 0],
+      ['Tesouro IPCA+ 2035', 'tesouro', xp, 15000, 500, 0.008, 0.012, 'IPCA + 6,5%', '', 0],
+      ['Ações - Carteira B3', 'acoes', xp, 18000, 700, 0.009, 0.045, '', 'ITUB4, WEGE3, BBAS3', 0.005],
+      ['FIIs', 'fiis', btg, 10000, 400, 0.002, 0.02, '', 'HGLG11, KNRI11, MXRF11', 0.008],
+      ['Fundo Multimercado', 'fundos', btg, 9000, 0, 0.008, 0.015, '', '', 0],
+      ['Previdência VGBL', 'previdencia', btg, 14000, 250, 0.0085, 0.006, '', '', 0],
+      ['Bitcoin', 'cripto', nubank, 3000, 100, 0.02, 0.12, '', 'BTC', 0],
+      ['ETF S&P 500', 'exterior', inter, 6000, 200, 0.011, 0.04, '', 'IVVB11', 0],
+    ];
+    const clampDay = (mk, d) => {
+      const iso = mk + '-' + String(Math.min(d, U.daysInMonth(mk))).padStart(2, '0');
+      return iso <= today ? iso : null;
+    };
+    const r2 = (v) => Math.round(v * 100) / 100;
+
+    specs.forEach(([name, cls, instId, initial, monthly, mean, vol, indexer, ticker, dy]) => {
+      const asset = store.saveAsset(
+        { name, classId: cls, institutionId: instId, ticker, indexer, maturity: name.includes('2027') ? '2027-06-15' : null, notes: '' },
+        initial,
+        clampDay(startMk, 3) || today,
+        false
+      );
+      let value = initial;
+      for (let i = 0; i < months; i++) {
+        const mk = U.addMonths(startMk, i);
+        value *= 1 + mean + vol * range(-1.6, 1.6);
+        if (i > 0 && monthly > 0) {
+          const ap = Math.round(monthly * range(0.6, 1.5));
+          value += ap;
+          const d = clampDay(mk, 6);
+          if (d) store.recordMovement(asset.id, 'aporte', ap, d, '', false);
+        }
+        if (i > 0 && dy > 0) {
+          const d = clampDay(mk, 15);
+          if (d) store.recordMovement(asset.id, 'provento', r2(value * dy * range(0.7, 1.3)), d, '', false);
+        }
+        const end = U.monthEnd(mk);
+        store.recordBalance(asset.id, end < today ? end : today, r2(value), false);
+      }
+    });
+
+    const fixed = [['salario', 9500, 5, 'Salário'], ['moradia', 2300, 10, 'Aluguel'], ['contas', 380, 12, 'Luz, água e internet'], ['assinaturas', 89.9, 15, 'Streaming e apps'], ['educacao', 450, 8, 'Curso de inglês']];
+    const variable = [['mercado', 180, 650, 'Supermercado'], ['alimentacao', 45, 160, 'Restaurante'], ['transporte', 25, 120, 'Combustível / app'], ['lazer', 40, 250, 'Cinema e passeios'], ['compras', 60, 400, 'Compras'], ['saude', 50, 300, 'Farmácia']];
+    const data = store.data;
+    const addTx = (date, amount, category, note) => {
+      if (!date) return;
+      const cat = P.categoryById(category);
+      data.transactions.push({ id: U.uid(), date, amount, category, income: cat.income, note });
+    };
+    for (let back = 0; back < 6; back++) {
+      const mk = U.addMonths(nowMk, -back);
+      fixed.forEach(([c, v, d, n]) => addTx(clampDay(mk, d), v, c, n));
+      if (back % 2 === 0) addTx(clampDay(mk, 21), Math.round(range(600, 1800)), 'freelance', 'Projeto extra');
+      for (let k = 0; k < 14; k++) {
+        const [c, lo, hi, n] = variable[Math.floor(rnd() * variable.length)];
+        addTx(clampDay(mk, 1 + Math.floor(range(0, 27))), r2(range(lo, hi)), c, n);
+      }
+    }
+    store.commit();
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/backends.js */
+/* Onde os dados ficam: Planilha Google (Apps Script), arquivo no Windows (Electron) ou navegador. */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+
+  const SGS_URL = (code) => {
+    const f = (d) => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+    const end = new Date();
+    const start = new Date(end.getFullYear() - 10, end.getMonth(), 1);
+    return 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.' + code + '/dados?formato=json&dataInicial=' + f(start) + '&dataFinal=' + f(end);
+  };
+  P.SGS_URL = SGS_URL;
+
+  function downloadBlob(name, content, mime) {
+    const blob = new Blob(['﻿' + content], { type: mime || 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 500);
+    return Promise.resolve({ message: 'Arquivo "' + name + '" baixado.' });
+  }
+
+  // ---- Google Apps Script (dados numa Planilha Google) ----
+  function appsScriptBackend() {
+    const run = (fn, ...args) =>
+      new Promise((resolve, reject) => {
+        g.google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
+      });
+    return {
+      id: 'appsscript',
+      label: 'Planilha Google',
+      async load() {
+        const json = await run('getData');
+        return json ? JSON.parse(json) : null;
+      },
+      save(data) {
+        return run('saveData', JSON.stringify(data));
+      },
+      async fetchSeries(code) {
+        return JSON.parse(await run('fetchSeries', code));
+      },
+      async saveFile(name, content) {
+        const url = await run('exportToDrive', name, content);
+        return { message: 'Arquivo salvo no seu Google Drive.', url };
+      },
+      async info() {
+        return JSON.parse(await run('getInfo'));
+      },
+    };
+  }
+
+  // ---- Windows (Electron): arquivo JSON na pasta do usuário ----
+  function desktopBackend() {
+    const api = g.desktopAPI;
+    return {
+      id: 'desktop',
+      label: 'Este computador',
+      async load() {
+        const json = await api.load();
+        return json ? JSON.parse(json) : null;
+      },
+      save(data) {
+        return api.save(JSON.stringify(data, null, 1));
+      },
+      async fetchSeries(code) {
+        return JSON.parse(await api.fetchText(SGS_URL(code)));
+      },
+      async saveFile(name, content) {
+        const path = await api.saveFile(name, '﻿' + content);
+        return { message: path ? 'Arquivo salvo em ' + path : 'Exportação cancelada.' };
+      },
+      async info() {
+        return { location: await api.dataPath() };
+      },
+    };
+  }
+
+  // ---- Navegador comum: localStorage ----
+  function localBackend() {
+    const KEY = 'patrimonio.data.v1';
+    return {
+      id: 'local',
+      label: 'Este navegador',
+      async load() {
+        const json = g.localStorage.getItem(KEY);
+        return json ? JSON.parse(json) : null;
+      },
+      async save(data) {
+        g.localStorage.setItem(KEY, JSON.stringify(data));
+      },
+      async fetchSeries(code) {
+        const res = await fetch(SGS_URL(code));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      },
+      saveFile: (name, content) => downloadBlob(name, content),
+      async info() {
+        return { location: 'Armazenamento local do navegador' };
+      },
+    };
+  }
+
+  P.detectBackend = function () {
+    if (g.google && g.google.script && g.google.script.run) return appsScriptBackend();
+    if (g.desktopAPI) return desktopBackend();
+    return localBackend();
+  };
+  P.downloadBlob = downloadBlob;
+
+  /** Converte a resposta do SGS em { "AAAA-MM": fração }. */
+  P.parseSeries = function (items) {
+    const out = {};
+    (items || []).forEach((it) => {
+      const m = String(it.data).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      const v = Number(String(it.valor).replace(',', '.'));
+      if (m && isFinite(v)) out[m[3] + '-' + m[2]] = v / 100;
+    });
+    return out;
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/charts.js */
+/* Gráficos (Chart.js) com cores que seguem o tema claro/escuro. */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+  const C = (P.charts = {});
+  const registry = [];
+
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  C.theme = () => ({
+    text: css('--text-2'),
+    grid: css('--border'),
+    accent: css('--accent'),
+    accentSoft: css('--accent-soft'),
+    green: css('--green'),
+    red: css('--red'),
+    orange: css('--orange'),
+    muted: css('--text-3'),
+    surface: css('--surface'),
+  });
+
+  C.destroyAll = function () {
+    while (registry.length) {
+      try {
+        registry.pop().destroy();
+      } catch (e) {
+        /* ignora */
+      }
+    }
+  };
+
+  function make(canvas, config) {
+    if (!canvas || !g.Chart) return null;
+    const chart = new g.Chart(canvas.getContext('2d'), config);
+    registry.push(chart);
+    return chart;
+  }
+
+  function base(hidden, t, yFormatter) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 250 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ' ' + ctx.dataset.label + ': ' + (hidden ? U.MASK : yFormatter(ctx.parsed.y)),
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: t.text, maxRotation: 0, autoSkipPadding: 12 } },
+        y: {
+          grid: { color: t.grid },
+          border: { display: false },
+          ticks: {
+            color: t.text,
+            callback: (v) => {
+              if (yFormatter !== U.money) return yFormatter(v);
+              return hidden ? '' : U.compact(v);
+            },
+          },
+        },
+      },
+    };
+  }
+
+  const pctTick = (v) => (Math.round(v * 10) / 10).toLocaleString('pt-BR') + '%';
+  C.pctTick = pctTick;
+
+  C.evolution = function (canvas, points, hidden) {
+    const t = C.theme();
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 260);
+    grad.addColorStop(0, t.accentSoft);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    return make(canvas, {
+      type: 'line',
+      data: {
+        labels: points.map((p) => U.fmtMonth(p.month)),
+        datasets: [
+          { label: 'Patrimônio', data: points.map((p) => p.total), borderColor: t.accent, backgroundColor: grad, fill: true, tension: 0.35, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4 },
+          { label: 'Valor investido', data: points.map((p) => p.invested), borderColor: t.muted, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, stepped: 'after', fill: false },
+        ],
+      },
+      options: base(hidden, t, U.money),
+    });
+  };
+
+  C.stacked = function (canvas, points, classes, hidden) {
+    const t = C.theme();
+    const opts = base(hidden, t, U.money);
+    opts.scales.y.stacked = true;
+    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    return make(canvas, {
+      type: 'line',
+      data: {
+        labels: points.map((p) => U.fmtMonth(p.month)),
+        datasets: classes.map((c) => ({
+          label: c.title,
+          data: points.map((p) => p.byClass[c.id] || 0),
+          borderColor: c.color,
+          backgroundColor: c.color + 'CC',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 1,
+        })),
+      },
+      options: opts,
+    });
+  };
+
+  C.donut = function (canvas, slices, hidden) {
+    const t = C.theme();
+    return make(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: slices.map((s) => s.label),
+        datasets: [{ data: slices.map((s) => s.value), backgroundColor: slices.map((s) => s.color), borderColor: t.surface, borderWidth: 2, hoverOffset: 6 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '64%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ' ' + ctx.label + ': ' + (hidden ? U.MASK : U.money(ctx.parsed)) + ' (' + U.pct(slices[ctx.dataIndex].share) + ')' } },
+        },
+      },
+    });
+  };
+
+  C.returnBars = function (canvas, perf) {
+    const t = C.theme();
+    const opts = base(false, t, pctTick);
+    opts.plugins.tooltip.callbacks.label = (ctx) => ' Rentabilidade: ' + pctTick(ctx.parsed.y);
+    return make(canvas, {
+      type: 'bar',
+      data: {
+        labels: perf.map((p) => U.fmtMonth(p.month)),
+        datasets: [{ label: 'Rentabilidade', data: perf.map((p) => (p.rate || 0) * 100), backgroundColor: perf.map((p) => ((p.rate || 0) >= 0 ? t.green : t.red)), borderRadius: 4 }],
+      },
+      options: opts,
+    });
+  };
+
+  C.cumulative = function (canvas, series) {
+    const t = C.theme();
+    const colors = { Carteira: t.accent, CDI: t.orange, IPCA: t.muted };
+    const months = Array.from(new Set(series.flatMap((s) => s.points.map((p) => p.month)))).sort();
+    const opts = base(false, t, pctTick);
+    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    return make(canvas, {
+      type: 'line',
+      data: {
+        labels: months.map(U.fmtMonth),
+        datasets: series.map((s) => {
+          const byMonth = {};
+          s.points.forEach((p) => (byMonth[p.month] = p.value * 100));
+          return {
+            label: s.name,
+            data: months.map((m) => (m in byMonth ? byMonth[m] : null)),
+            borderColor: colors[s.name] || t.accent,
+            backgroundColor: colors[s.name] || t.accent,
+            borderWidth: s.name === 'Carteira' ? 2.5 : 1.5,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: true,
+          };
+        }),
+      },
+      options: opts,
+    });
+  };
+
+  C.flows = function (canvas, perf, hidden) {
+    const t = C.theme();
+    const opts = base(hidden, t, U.money);
+    opts.scales.x.stacked = true;
+    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    return make(canvas, {
+      type: 'bar',
+      data: {
+        labels: perf.map((p) => U.fmtMonth(p.month)),
+        datasets: [
+          { label: 'Aportes', data: perf.map((p) => p.aportes), backgroundColor: t.green, borderRadius: 3, stack: 'a' },
+          { label: 'Resgates', data: perf.map((p) => -p.resgates), backgroundColor: t.red, borderRadius: 3, stack: 'a' },
+          { label: 'Proventos', data: perf.map((p) => p.proventos), backgroundColor: t.orange, borderRadius: 3, stack: 'p' },
+        ],
+      },
+      options: opts,
+    });
+  };
+
+  C.assetHistory = function (canvas, snaps, color, hidden) {
+    const t = C.theme();
+    const opts = base(hidden, t, U.money);
+    opts.scales.y.beginAtZero = false;
+    return make(canvas, {
+      type: 'line',
+      data: {
+        labels: snaps.map((s) => U.fmtDate(s.date)),
+        datasets: [{ label: 'Saldo', data: snaps.map((s) => s.value), borderColor: color, backgroundColor: color + '22', fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2 }],
+      },
+      options: opts,
+    });
+  };
+
+  C.cashBars = function (canvas, months, hidden) {
+    const t = C.theme();
+    const opts = base(hidden, t, U.money);
+    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    return make(canvas, {
+      type: 'bar',
+      data: {
+        labels: months.map((m) => U.fmtMonth(m.month)),
+        datasets: [
+          { label: 'Receitas', data: months.map((m) => m.income), backgroundColor: t.green, borderRadius: 4 },
+          { label: 'Despesas', data: months.map((m) => m.expense), backgroundColor: t.red, borderRadius: 4 },
+        ],
+      },
+      options: opts,
+    });
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* js/app.js */
+/* Interface do Patrimônio (web / Windows / Apps Script). */
+(function (g) {
+  'use strict';
+  const P = g.Patrimonio;
+  const U = P.util;
+  const C = P.charts;
+  const esc = U.escape;
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+  const state = {
+    view: 'dashboard',
+    assetId: null,
+    evoPeriod: 12,
+    evoMode: 'total',
+    allocMode: 'class',
+    perfPeriod: 12,
+    group: 'institution',
+    showArchived: false,
+    search: '',
+    cashMonth: U.monthKey(U.today()),
+    updateDate: U.today(),
+    entries: {},
+    benchError: null,
+    benchLoading: false,
+  };
+  let store;
+  let renderQueued = false;
+
+  const TITLES = { dashboard: 'Patrimônio', portfolio: 'Carteira', asset: 'Investimento', update: 'Atualizar saldos', cashflow: 'Orçamento', settings: 'Ajustes' };
+  const PERIODS = [[6, '6M'], [12, '1A'], [24, '2A'], [60, '5A'], [0, 'Tudo']];
+
+  const hidden = () => !!store.data.settings.hideValues;
+  const money = (v) => U.money(v, hidden());
+  const signed = (v) => U.signedMoney(v, hidden());
+  const cls = (v) => (v >= 0 ? 'pos' : 'neg');
+  const instOf = (asset) => store.institution(asset.institutionId);
+  const instName = (asset) => (instOf(asset) || { name: 'Sem instituição' }).name;
+  const initials = (name) =>
+    (String(name).split(/\s+/).filter((w) => /[A-Za-zÀ-ÿ]/.test(w)).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
+
+  function badge(name, color, round) {
+    return '<span class="badge' + (round ? ' round' : '') + '" style="background:' + esc(color) + '">' + esc(initials(name)) + '</span>';
+  }
+  function seg(name, options, current) {
+    return (
+      '<div class="seg" role="group">' +
+      options.map(([v, label]) => '<button type="button" data-seg="' + name + '" data-val="' + esc(v) + '" class="' + (String(v) === String(current) ? 'on' : '') + '">' + esc(label) + '</button>').join('') +
+      '</div>'
+    );
+  }
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => t.classList.remove('show'), 3200);
+  }
+
+  // =====================================================================
+  // Inicialização
+  // =====================================================================
+
+  function init() {
+    const backend = P.detectBackend();
+    store = P.createStore(backend);
+    $('#storage-label').textContent = 'Dados: ' + backend.label;
+    store.onChange((data, status, statusOnly) => {
+      renderStatus(status);
+      if (!statusOnly) queueRender();
+    });
+
+    $$('.nav-item').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
+    $('#toggle-hide').addEventListener('click', () => store.setSetting('hideValues', !hidden()));
+    document.addEventListener('click', onGlobalClick);
+    // No Windows o próprio app grava antes de fechar; no navegador, avisa se há gravação pendente.
+    if (backend.id !== 'desktop') {
+      g.addEventListener('beforeunload', (e) => {
+        if (store.status === 'pending' || store.status === 'saving') {
+          store.flush();
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      });
+    }
+
+    store
+      .load()
+      .then(() => {
+        render();
+        refreshBenchmarks(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        $('#view').innerHTML = '<div class="card"><h2>Não foi possível carregar os dados</h2><p class="muted">' + esc(err && err.message ? err.message : err) + '</p></div>';
+      });
+  }
+
+  function renderStatus(status) {
+    const el = $('#save-status');
+    const map = { pending: 'Alterações pendentes…', saving: 'Salvando…', saved: 'Salvo às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), error: 'Erro ao salvar — tente novamente', idle: '' };
+    el.textContent = map[status] || '';
+    el.classList.toggle('error', status === 'error');
+  }
+
+  function go(view, assetId) {
+    state.view = view;
+    state.assetId = assetId || null;
+    render();
+    g.scrollTo && g.scrollTo(0, 0);
+  }
+
+  function queueRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      render();
+    });
+  }
+
+  function render() {
+    C.destroyAll();
+    $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view || (state.view === 'asset' && b.dataset.view === 'portfolio')));
+    $('#toggle-hide').classList.toggle('on', hidden());
+    $('#page-title').textContent = TITLES[state.view] || 'Patrimônio';
+    const view = $('#view');
+    const renderers = { dashboard: renderDashboard, portfolio: renderPortfolio, asset: renderAsset, update: renderUpdate, cashflow: renderCashflow, settings: renderSettings };
+    (renderers[state.view] || renderDashboard)(view);
+  }
+
+  function onGlobalClick(e) {
+    const segBtn = e.target.closest('[data-seg]');
+    if (segBtn) {
+      const key = segBtn.dataset.seg;
+      const raw = segBtn.dataset.val;
+      state[key] = /^\d+$/.test(raw) ? Number(raw) : raw;
+      render();
+      return;
+    }
+    const act = e.target.closest('[data-action]');
+    if (act && ACTIONS[act.dataset.action]) {
+      e.preventDefault();
+      ACTIONS[act.dataset.action](act.dataset.id, act);
+    }
+  }
+
+  const ACTIONS = {
+    go: (view) => go(view),
+    'open-asset': (id) => go('asset', id),
+    'new-asset': () => openAssetForm(null),
+    'edit-asset': (id) => openAssetForm(store.asset(id)),
+    'quick-update': (id) => openQuickUpdate(store.asset(id)),
+    'toggle-archive': (id) => {
+      const a = store.asset(id);
+      a.archived = !a.archived;
+      store.commit();
+      toast(a.archived ? 'Investimento arquivado.' : 'Investimento reativado.');
+    },
+    'delete-asset': async (id) => {
+      const a = store.asset(id);
+      const ok = await confirmDialog('Excluir "' + a.name + '"?', 'Todo o histórico de saldos e movimentações será apagado. Se você resgatou o investimento, prefira arquivá-lo para manter o histórico nos gráficos.', 'Excluir', true);
+      if (!ok) return;
+      state.view = 'portfolio';
+      store.deleteAsset(id);
+      toast('Investimento excluído.');
+    },
+    'delete-snapshot': (id) => store.deleteSnapshot(id),
+    'delete-movement': (id) => store.deleteMovement(id),
+    'new-institution': () => openInstitutionForm(null),
+    'edit-institution': (id) => openInstitutionForm(store.institution(id)),
+    'delete-institution': async (id) => {
+      const inst = store.institution(id);
+      const n = store.data.assets.filter((a) => a.institutionId === id).length;
+      const ok = await confirmDialog('Excluir ' + inst.name + '?', n ? 'Os ' + n + ' investimento(s) desta instituição e seus históricos também serão apagados.' : 'A instituição será removida.', 'Excluir', true);
+      if (ok) store.deleteInstitution(id);
+    },
+    'new-expense': () => openTransactionForm(null, false),
+    'new-income': () => openTransactionForm(null, true),
+    'edit-tx': (id) => {
+      const t = store.data.transactions.find((x) => x.id === id);
+      openTransactionForm(t, t.income);
+    },
+    'cash-prev': () => {
+      state.cashMonth = U.addMonths(state.cashMonth, -1);
+      render();
+    },
+    'cash-next': () => {
+      state.cashMonth = U.addMonths(state.cashMonth, 1);
+      render();
+    },
+    sample: async () => {
+      if (store.data.assets.length) {
+        const ok = await confirmDialog('Carregar dados de exemplo?', 'Investimentos e lançamentos fictícios serão adicionados aos seus dados atuais.', 'Carregar');
+        if (!ok) return;
+      }
+      P.loadSampleData(store);
+      state.view = 'dashboard';
+      toast('Dados de exemplo carregados.');
+    },
+    'refresh-bench': () => refreshBenchmarks(true),
+    'open-data-folder': () => g.desktopAPI && g.desktopAPI.openDataFolder(),
+    'import-csv': () => pickFile('.csv,.txt,.tsv,text/csv', importCSV),
+    'import-json': () => pickFile('.json,application/json', importJSON),
+    'export-csv': () => exportFile('patrimonio.csv', P.csv.exportPortfolio(store)),
+    'export-tx': () => exportFile('orcamento.csv', P.csv.exportTransactions(store)),
+    'export-json': () => exportFile('patrimonio-backup-' + U.today() + '.json', JSON.stringify(store.data, null, 1)),
+    'csv-help': () => openCsvHelp(),
+    'download-template': (which) => exportFile('modelo-' + which + '.csv', which === 'meses' ? P.csv.TEMPLATE_MONTHS : P.csv.TEMPLATE_ROWS),
+    wipe: async () => {
+      const ok = await confirmDialog('Apagar todos os dados?', 'Instituições, investimentos, históricos e lançamentos serão apagados. Exporte um backup antes se quiser guardar uma cópia.', 'Apagar tudo', true);
+      if (ok) {
+        store.wipe();
+        state.view = 'dashboard';
+        toast('Dados apagados.');
+      }
+    },
+    'save-goal': () => {
+      const v = U.parseNumber($('#goal-input').value);
+      store.setSetting('goal', v && v > 0 ? v : 0);
+      toast(v > 0 ? 'Meta salva.' : 'Meta removida.');
+    },
+    'fill-last': (id) => {
+      const input = $('input[data-balance="' + id + '"]');
+      input.value = U.editable(store.currentValue(id));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    'save-update': () => saveUpdate(),
+    'clear-update': () => {
+      state.entries = {};
+      render();
+    },
+  };
+
+  // =====================================================================
+  // Início (dashboard)
+  // =====================================================================
+
+  function renderDashboard(view) {
+    const data = store.data;
+    if (!data.assets.length) {
+      view.innerHTML =
+        '<div class="card empty">' +
+        '<svg viewBox="0 0 24 24" width="64" height="64" style="color:var(--accent)"><path d="M11 2v10h10A10 10 0 0 0 11 2zm-2 2.1A10 10 0 1 0 19.9 15H9z"/></svg>' +
+        '<h2>Todo o seu patrimônio em um só lugar</h2>' +
+        '<p>Cadastre seus investimentos de todos os bancos e corretoras, atualize os saldos uma vez por mês e acompanhe a evolução com gráficos.</p>' +
+        '<div class="actions">' +
+        '<button class="btn primary" data-action="new-asset">+ Adicionar investimento</button>' +
+        '<button class="btn" data-action="go" data-id="settings">Importar minha planilha</button>' +
+        '<button class="btn ghost" data-action="sample">Explorar com dados de exemplo</button>' +
+        '</div></div>';
+      return;
+    }
+
+    const an = new P.Analytics(data);
+    const today = an.today;
+    const total = an.total();
+    const invested = an.invested();
+    const totalGain = total - invested + an.proventos();
+    const month = an.performanceFor(U.monthKey(today));
+    const year = today.slice(0, 4);
+    const ytd = an.performance().filter((p) => p.month.startsWith(year));
+    const ytdRate = ytd.reduce((acc, p) => (p.rate === null ? acc : acc * (1 + p.rate)), 1) - 1;
+    const goal = data.settings.goal || 0;
+
+    let html = '<div class="grid">';
+
+    // ---- Resumo
+    html +=
+      '<section class="card ' + (goal > 0 ? 'span-8' : 'span-12') + '">' +
+      '<div class="kpi-label">Patrimônio total</div>' +
+      '<div class="kpi-value num">' + money(total) + '</div>' +
+      '<div class="' + cls(month.gain) + ' num">' + signed(month.gain) + (month.rate !== null ? ' (' + U.pct(month.rate, true) + ')' : '') + ' <span class="muted">no mês</span></div>' +
+      '<div class="kpi-row">' +
+      kpi('Valor investido', money(invested)) +
+      kpi('Ganho total', '<span class="' + cls(totalGain) + '">' + signed(totalGain) + '</span>') +
+      kpi('Rentabilidade no ano', '<span class="' + cls(ytdRate) + '">' + U.pct(ytdRate, true) + '</span>') +
+      kpi('Investimentos', String(data.assets.filter((a) => !a.archived).length)) +
+      kpi('Instituições', String(new Set(data.assets.filter((a) => !a.archived).map((a) => a.institutionId)).size)) +
+      '</div></section>';
+
+    // ---- Meta
+    if (goal > 0) {
+      const last12 = an.performance(12);
+      const avgContribution = last12.length ? last12.reduce((a, p) => a + p.netContribution, 0) / last12.length : 0;
+      const rates = last12.map((p) => p.rate).filter((r) => r !== null);
+      const avgRate = rates.length ? Math.max(rates.reduce((a, b) => a + b, 0) / rates.length, 0) : 0;
+      const months = P.Analytics.monthsToReach(goal, total, Math.max(avgContribution, 0), avgRate);
+      const progress = Math.max(0, Math.min(1, total / goal));
+      html +=
+        '<section class="card span-4">' +
+        '<div class="card-head"><div><h3 class="card-title">Meta de patrimônio</h3><div class="card-sub">' + money(goal) + '</div></div><strong style="color:var(--accent)">' + U.pct(progress) + '</strong></div>' +
+        '<div class="progress"><span style="width:' + (progress * 100).toFixed(1) + '%"></span></div>' +
+        (progress >= 1
+          ? '<p class="pos">Meta atingida! 🎉</p>'
+          : '<p>Faltam <strong class="num">' + money(goal - total) + '</strong>' + (months !== null ? '<br><span class="muted">Estimativa: ' + describeMonths(months) + '</span>' : '') + '</p>' +
+            '<div class="faint">Com base na média de aportes e rentabilidade dos últimos 12 meses.</div>') +
+        '</section>';
+    }
+
+    // ---- Evolução
+    const points = an.evolution(state.evoPeriod);
+    const first = points[0];
+    const last = points[points.length - 1];
+    const classes = P.ASSET_CLASSES.filter((c) => points.some((p) => (p.byClass[c.id] || 0) > 0));
+    html +=
+      '<section class="card span-12">' +
+      '<div class="card-head"><div><h3 class="card-title">Evolução patrimonial</h3>' +
+      (points.length > 1 && !hidden() ? '<div class="card-sub">' + signed(last.total - first.total) + ' desde ' + U.fmtMonth(first.month) + '</div>' : '') +
+      '</div><div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      seg('evoMode', [['total', 'Total'], ['class', 'Por classe']], state.evoMode) +
+      seg('evoPeriod', PERIODS, state.evoPeriod) +
+      '</div></div>' +
+      '<div class="chart-box"><canvas id="ch-evo"></canvas></div>' +
+      (state.evoMode === 'total' ? '<div class="legend"><span><i class="dot" style="background:var(--accent)"></i>Patrimônio</span><span><i class="dot" style="background:var(--text-3)"></i>Valor investido (aportes − resgates)</span></div>' : '') +
+      '</section>';
+
+    // ---- Alocação
+    const slices = state.allocMode === 'class' ? an.allocationByClass() : an.allocationByInstitution();
+    html +=
+      '<section class="card span-5">' +
+      '<div class="card-head"><h3 class="card-title">Distribuição da carteira</h3>' + seg('allocMode', [['class', 'Classe'], ['inst', 'Instituição']], state.allocMode) + '</div>' +
+      '<div class="chart-box donut"><canvas id="ch-alloc"></canvas></div>' +
+      '<div class="list" style="margin-top:10px">' +
+      slices.map((s) => '<div class="row"><i class="dot" style="background:' + s.color + '"></i><div class="grow title">' + esc(s.label) + '</div><div class="muted num">' + money(s.value) + '</div><div class="num" style="width:64px;text-align:right;font-weight:600">' + U.pct(s.share) + '</div></div>').join('') +
+      '</div></section>';
+
+    // ---- Rentabilidade
+    const perf = an.performance(state.perfPeriod);
+    const firstValid = perf.findIndex((p) => p.rate !== null);
+    const valid = firstValid >= 0 ? perf.slice(firstValid) : [];
+    const portfolioCum = P.Analytics.cumulative(valid);
+    const bench = data.benchmarks || {};
+    const cdiCum = P.Analytics.cumulative(valid.map((p) => ({ month: p.month, rate: bench.cdi && p.month in bench.cdi ? bench.cdi[p.month] : null })));
+    const ipcaCum = P.Analytics.cumulative(valid.map((p) => ({ month: p.month, rate: bench.ipca && p.month in bench.ipca ? bench.ipca[p.month] : null })));
+    const accP = portfolioCum.length ? portfolioCum[portfolioCum.length - 1].value : 0;
+    const accCDI = cdiCum.length ? cdiCum[cdiCum.length - 1].value : null;
+    html +=
+      '<section class="card span-7">' +
+      '<div class="card-head"><div><h3 class="card-title">Rentabilidade</h3><div class="card-sub">Mensal e acumulada no período</div></div>' + seg('perfPeriod', PERIODS, state.perfPeriod) + '</div>' +
+      '<div class="kpi-row" style="margin-top:0;padding-top:0;border:0;margin-bottom:10px">' +
+      kpi('Carteira', '<span class="' + cls(accP) + '">' + U.pct(accP, true) + '</span>') +
+      (accCDI !== null ? kpi('CDI', '<span style="color:var(--orange)">' + U.pct(accCDI, true) + '</span>') : '') +
+      (accCDI !== null && accCDI > 0.0001 ? kpi('% do CDI', U.pct(accP / accCDI)) : '') +
+      (ipcaCum.length ? kpi('IPCA', U.pct(ipcaCum[ipcaCum.length - 1].value, true)) : '') +
+      '</div>' +
+      '<div class="chart-box sm"><canvas id="ch-returns"></canvas></div>' +
+      '<div class="chart-box sm" style="margin-top:12px"><canvas id="ch-cum"></canvas></div>' +
+      (state.benchError && !Object.keys(bench.cdi || {}).length ? '<div class="faint">' + esc(state.benchError) + '</div>' : '') +
+      '</section>';
+
+    // ---- Aportes
+    const p12 = an.performance(12);
+    const sum = (k) => p12.reduce((a, p) => a + p[k], 0);
+    const avg = p12.length ? (sum('aportes') - sum('resgates')) / p12.length : 0;
+    html +=
+      '<section class="card span-6">' +
+      '<div class="card-head"><div><h3 class="card-title">Aportes e proventos</h3><div class="card-sub">Últimos 12 meses · média líquida ' + money(avg) + '/mês</div></div></div>' +
+      '<div class="kpi-row" style="margin-top:0;padding-top:0;border:0;margin-bottom:10px">' +
+      kpi('Aportado', '<span class="pos">' + money(sum('aportes')) + '</span>') +
+      kpi('Resgatado', '<span class="neg">' + money(sum('resgates')) + '</span>') +
+      kpi('Proventos', '<span style="color:var(--orange)">' + money(sum('proventos')) + '</span>') +
+      '</div>' +
+      '<div class="chart-box sm" style="height:210px"><canvas id="ch-flows"></canvas></div>' +
+      '</section>';
+
+    // ---- Por instituição
+    const byInst = an.allocationByInstitution();
+    const prevEnd = U.monthEnd(U.addMonths(U.monthKey(today), -1));
+    html +=
+      '<section class="card span-6">' +
+      '<div class="card-head"><div><h3 class="card-title">Por instituição</h3><div class="card-sub">Variação desde o fim do mês passado</div></div></div><div class="list">' +
+      byInst
+        .map((s) => {
+          const prev = an.assets.filter((a) => (a.institutionId || '_') === s.key).reduce((acc, a) => acc + an.valueOf(a, prevEnd), 0);
+          const diff = s.value - prev;
+          return (
+            '<div class="row">' + badge(s.label, s.color, true) +
+            '<div class="grow"><div class="title">' + esc(s.label) + '</div><div class="sub">' + U.pct(s.share) + ' da carteira</div></div>' +
+            '<div class="right"><div class="num" style="font-weight:600">' + money(s.value) + '</div>' +
+            (prev > 0 ? '<div class="num ' + cls(diff) + '" style="font-size:12.5px">' + signed(diff) + '</div>' : '') +
+            '</div></div>'
+          );
+        })
+        .join('') +
+      '</div></section>';
+
+    html += '</div>';
+    view.innerHTML = html;
+
+    if (state.evoMode === 'total') C.evolution($('#ch-evo'), points, hidden());
+    else C.stacked($('#ch-evo'), points, classes, hidden());
+    C.donut($('#ch-alloc'), slices, hidden());
+    C.returnBars($('#ch-returns'), perf);
+    const series = [{ name: 'Carteira', points: portfolioCum }];
+    if (cdiCum.length) series.push({ name: 'CDI', points: cdiCum });
+    if (ipcaCum.length) series.push({ name: 'IPCA', points: ipcaCum });
+    C.cumulative($('#ch-cum'), series);
+    C.flows($('#ch-flows'), p12, hidden());
+  }
+
+  function kpi(label, value) {
+    return '<div class="item"><div class="l">' + esc(label) + '</div><div class="v num">' + value + '</div></div>';
+  }
+
+  function describeMonths(m) {
+    if (m === 0) return 'agora';
+    const y = Math.floor(m / 12);
+    const r = m % 12;
+    if (!y) return m + (m === 1 ? ' mês' : ' meses');
+    if (!r) return y + (y === 1 ? ' ano' : ' anos');
+    return y + (y === 1 ? ' ano' : ' anos') + ' e ' + r + (r === 1 ? ' mês' : ' meses');
+  }
+
+  // =====================================================================
+  // Carteira
+  // =====================================================================
+
+  function renderPortfolio(view) {
+    view.innerHTML =
+      '<div class="toolbar">' +
+      '<input id="search" class="search" type="text" placeholder="Buscar investimento, banco ou ticker" value="' + esc(state.search) + '">' +
+      seg('group', [['institution', 'Por instituição'], ['class', 'Por classe']], state.group) +
+      '<label class="check"><input type="checkbox" id="show-archived"' + (state.showArchived ? ' checked' : '') + '> Mostrar arquivados</label>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" data-action="new-institution">+ Instituição</button>' +
+      '<button class="btn primary" data-action="new-asset">+ Investimento</button>' +
+      '</div><div id="portfolio-list"></div>';
+    $('#search').addEventListener('input', (e) => {
+      state.search = e.target.value;
+      renderPortfolioList();
+    });
+    $('#show-archived').addEventListener('change', (e) => {
+      state.showArchived = e.target.checked;
+      renderPortfolioList();
+    });
+    renderPortfolioList();
+  }
+
+  function renderPortfolioList() {
+    const box = $('#portfolio-list');
+    const q = U.norm(state.search);
+    const assets = store.data.assets.filter(
+      (a) => (state.showArchived || !a.archived) && (!q || U.norm(a.name).includes(q) || U.norm(instName(a)).includes(q) || U.norm(a.ticker).includes(q))
+    );
+    if (!store.data.assets.length) {
+      box.innerHTML = '<div class="card empty"><h2>Nenhum investimento</h2><p>Adicione seus investimentos de cada banco ou corretora, ou importe sua planilha em Ajustes.</p><div class="actions"><button class="btn primary" data-action="new-asset">+ Adicionar investimento</button></div></div>';
+      return;
+    }
+    const total = assets.reduce((acc, a) => acc + store.currentValue(a.id), 0);
+    const groups = {};
+    assets.forEach((a) => {
+      let key, title, color;
+      if (state.group === 'class') {
+        const c = P.classById(a.classId);
+        key = c.id;
+        title = c.title;
+        color = c.color;
+      } else {
+        const inst = instOf(a);
+        key = a.institutionId || '_';
+        title = inst ? inst.name : 'Sem instituição';
+        color = inst ? inst.color : '#8E8E93';
+      }
+      groups[key] = groups[key] || { title, color, assets: [], total: 0 };
+      groups[key].assets.push(a);
+      groups[key].total += store.currentValue(a.id);
+    });
+    const list = Object.values(groups).sort((a, b) => b.total - a.total);
+
+    let html =
+      '<div class="card" style="margin-bottom:16px"><div class="kpi-label">Total ' + (q ? 'filtrado' : 'na carteira') + '</div><div class="kpi-value num">' + money(total) + '</div>' +
+      '<div class="muted">' + assets.length + ' investimento(s) em ' + new Set(assets.map((a) => a.institutionId)).size + ' instituição(ões)</div></div>';
+    if (!list.length) html += '<div class="card empty"><p>Nada encontrado para "' + esc(state.search) + '".</p></div>';
+    html += '<div class="grid">';
+    list.forEach((grp) => {
+      html +=
+        '<section class="card span-6"><div class="group-head"><span style="display:flex;align-items:center;gap:8px"><i class="dot" style="background:' + grp.color + '"></i>' + esc(grp.title) + '</span><span class="num">' + money(grp.total) + '</span></div><div class="list">';
+      grp.assets
+        .sort((a, b) => store.currentValue(b.id) - store.currentValue(a.id))
+        .forEach((a) => {
+          const c = P.classById(a.classId);
+          const value = store.currentValue(a.id);
+          const inv = store.invested(a.id);
+          const gp = inv > 0 ? store.gain(a.id) / inv : null;
+          const sub = [state.group === 'class' ? instName(a) : c.title, a.indexer, total > 0 ? U.pct(value / total) : ''].filter(Boolean).join(' · ');
+          html +=
+            '<div class="row clickable" data-action="open-asset" data-id="' + a.id + '">' + badge(c.title, c.color) +
+            '<div class="grow"><div class="title">' + esc(a.name) + (a.archived ? ' <span class="tag">arquivado</span>' : '') + '</div><div class="sub">' + esc(sub) + '</div></div>' +
+            '<div class="right"><div class="num" style="font-weight:600">' + money(value) + '</div>' +
+            (gp !== null ? '<div class="num ' + cls(gp) + '" style="font-size:12.5px">' + U.pct(gp, true) + '</div>' : '') +
+            '</div></div>';
+        });
+      html += '</div></section>';
+    });
+    html += '</div>';
+    box.innerHTML = html;
+  }
+
+  // =====================================================================
+  // Detalhe do investimento
+  // =====================================================================
+
+  function renderAsset(view) {
+    const a = store.asset(state.assetId);
+    if (!a) return go('portfolio');
+    const c = P.classById(a.classId);
+    const inst = instOf(a);
+    const snaps = store.snapshotsOf(a.id);
+    const value = store.currentValue(a.id);
+    const inv = store.invested(a.id);
+    const gain = store.gain(a.id);
+    const last = store.lastUpdate(a.id);
+    $('#page-title').textContent = a.name;
+
+    const history = snaps
+      .map((s) => ({ date: s.date, type: 'snap', item: s }))
+      .concat(store.movementsOf(a.id).map((m) => ({ date: m.date, type: 'mov', item: m })))
+      .sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : x.type === 'snap' ? 1 : -1));
+
+    let info = '';
+    const line = (l, v) => (v ? '<div class="row"><div class="grow muted">' + esc(l) + '</div><div>' + v + '</div></div>' : '');
+    info += line('Instituição', esc(inst ? inst.name : 'Sem instituição'));
+    info += line('Classe', esc(c.title));
+    info += line('Indexador', esc(a.indexer));
+    info += line('Código / ticker', esc(a.ticker));
+    if (a.maturity) {
+      const days = U.daysBetween(U.today(), a.maturity);
+      info += line('Vencimento', U.fmtDate(a.maturity) + (days >= 0 ? ' <span class="muted">(' + days + ' dias)</span>' : ' <span class="tag">vencido</span>'));
+    }
+    info += line('Cadastrado em', U.fmtDate(a.createdAt));
+    if (a.notes) info += '<p class="muted">' + esc(a.notes) + '</p>';
+
+    view.innerHTML =
+      '<div class="toolbar"><button class="btn small" data-action="go" data-id="portfolio">‹ Carteira</button><span class="spacer"></span>' +
+      '<button class="btn" data-action="edit-asset" data-id="' + a.id + '">Editar</button>' +
+      '<button class="btn primary" data-action="quick-update" data-id="' + a.id + '">Atualizar saldo / movimentar</button></div>' +
+      '<div class="grid">' +
+      '<section class="card span-12"><div style="display:flex;align-items:center;gap:12px">' + badge(c.title, c.color) +
+      '<div><div class="muted" style="font-size:13px">' + esc(c.title) + ' · ' + esc(inst ? inst.name : 'Sem instituição') + '</div><div style="font-weight:650">' + esc(a.name) + (a.archived ? ' <span class="tag">arquivado</span>' : '') + '</div></div></div>' +
+      '<div class="kpi-value num" style="margin-top:12px">' + money(value) + '</div>' +
+      '<div class="num ' + cls(gain) + '">' + signed(gain) + (inv > 0 ? ' (' + U.pct(gain / inv, true) + ')' : '') + ' <span class="muted">de resultado</span></div>' +
+      '<div class="kpi-row">' + kpi('Valor investido', money(inv)) + kpi('Proventos recebidos', money(store.proventos(a.id))) + kpi('Última atualização', last ? U.fmtDate(last) : '—') + '</div></section>' +
+      (snaps.length >= 2 ? '<section class="card span-8"><h3 class="card-title">Evolução</h3><div class="chart-box" style="margin-top:10px"><canvas id="ch-asset"></canvas></div></section>' : '') +
+      '<section class="card ' + (snaps.length >= 2 ? 'span-4' : 'span-12') + '"><h3 class="card-title">Informações</h3><div class="list">' + info + '</div></section>' +
+      '<section class="card span-12"><h3 class="card-title">Histórico</h3><div class="list">' +
+      (history.length
+        ? history
+            .map((h) => {
+              if (h.type === 'snap') {
+                return '<div class="row"><span class="badge round" style="background:#0A84FF">=</span><div class="grow"><div class="title">Saldo informado</div><div class="sub">' + U.fmtDate(h.date) + '</div></div><div class="num">' + money(h.item.value) + '</div><button class="icon-btn" title="Apagar" data-action="delete-snapshot" data-id="' + h.item.id + '">×</button></div>';
+              }
+              const k = P.kindById(h.item.kind);
+              return '<div class="row"><span class="badge round" style="background:' + k.color + '">' + (k.id === 'aporte' ? '+' : k.id === 'resgate' ? '−' : '$') + '</span><div class="grow"><div class="title">' + esc(k.title) + (h.item.note ? ' · ' + esc(h.item.note) : '') + '</div><div class="sub">' + U.fmtDate(h.date) + '</div></div><div class="num" style="color:' + k.color + '">' + money(h.item.amount) + '</div><button class="icon-btn" title="Apagar" data-action="delete-movement" data-id="' + h.item.id + '">×</button></div>';
+            })
+            .join('')
+        : '<p class="muted">Nenhum registro ainda.</p>') +
+      '</div></section>' +
+      '<section class="card span-12" style="display:flex;gap:10px;flex-wrap:wrap">' +
+      '<button class="btn" data-action="toggle-archive" data-id="' + a.id + '">' + (a.archived ? 'Reativar investimento' : 'Arquivar (resgatado/encerrado)') + '</button>' +
+      '<button class="btn danger" data-action="delete-asset" data-id="' + a.id + '">Excluir investimento</button></section>' +
+      '</div>';
+    if (snaps.length >= 2) C.assetHistory($('#ch-asset'), snaps, c.color, hidden());
+  }
+
+  // =====================================================================
+  // Atualizar saldos (fechamento do mês)
+  // =====================================================================
+
+  function renderUpdate(view) {
+    const assets = store.data.assets.filter((a) => !a.archived);
+    if (!assets.length) {
+      view.innerHTML = '<div class="card empty"><h2>Nada para atualizar</h2><p>Cadastre seus investimentos na Carteira ou importe sua planilha em Ajustes.</p><div class="actions"><button class="btn primary" data-action="new-asset">+ Adicionar investimento</button></div></div>';
+      return;
+    }
+    const mk = U.monthKey(state.updateDate);
+    const outdated = assets.filter((a) => {
+      const l = store.lastUpdate(a.id);
+      return !l || U.monthKey(l) !== mk;
+    }).length;
+
+    const groups = {};
+    assets.forEach((a) => {
+      const k = a.institutionId || '_';
+      groups[k] = groups[k] || { inst: instOf(a), assets: [] };
+      groups[k].assets.push(a);
+    });
+    const ordered = Object.values(groups).sort((x, y) => (x.inst ? x.inst.name : 'zzz').localeCompare(y.inst ? y.inst.name : 'zzz'));
+
+    let rows = '';
+    ordered.forEach((grp) => {
+      rows += '<tr class="inst"><td colspan="4"><span style="display:inline-flex;align-items:center;gap:8px"><i class="dot" style="background:' + (grp.inst ? grp.inst.color : '#8E8E93') + '"></i>' + esc(grp.inst ? grp.inst.name : 'Sem instituição') + '</span></td></tr>';
+      grp.assets
+        .sort((x, y) => x.name.localeCompare(y.name))
+        .forEach((a) => {
+          const e = state.entries[a.id] || {};
+          const last = store.lastUpdate(a.id);
+          const done = last && U.monthKey(last) === mk;
+          rows +=
+            '<tr data-row="' + a.id + '" class="' + (e.balance || e.amount ? 'dirty' : '') + '">' +
+            '<td><div style="font-weight:550">' + (done ? '<span class="pos" title="Atualizado neste mês">✓</span> ' : '') + esc(a.name) + '</div><div class="faint">' + esc(P.classById(a.classId).title) + '</div></td>' +
+            '<td class="last num muted">' + (last ? money(store.currentValue(a.id)) + '<div class="faint">em ' + U.fmtDate(last) + '</div>' : 'Sem saldo') + '</td>' +
+            '<td><div style="display:flex;gap:4px;align-items:center"><input class="money-input" inputmode="decimal" data-balance="' + a.id + '" placeholder="novo saldo" value="' + esc(e.balance || '') + '">' +
+            (last ? '<button class="btn small" title="Repetir o último saldo" data-action="fill-last" data-id="' + a.id + '">=</button>' : '') + '</div>' +
+            '<div class="faint num" data-diff="' + a.id + '"></div></td>' +
+            '<td class="flowcell"><div class="flow"><select data-kind="' + a.id + '">' +
+            P.MOVEMENT_KINDS.map((k) => '<option value="' + k.id + '"' + (e.kind === k.id ? ' selected' : '') + '>' + k.title + '</option>').join('') +
+            '</select><input class="money-input" style="width:120px" inputmode="decimal" data-amount="' + a.id + '" placeholder="valor" value="' + esc(e.amount || '') + '"></div></td>' +
+            '</tr>';
+        });
+    });
+
+    view.innerHTML =
+      '<div class="card" style="margin-bottom:16px"><div class="toolbar" style="margin:0">' +
+      '<div class="field" style="margin:0"><label for="upd-date">Data dos saldos</label><input type="date" id="upd-date" value="' + state.updateDate + '" max="' + U.today() + '"></div>' +
+      '<div class="grow" style="flex:1;min-width:240px">' +
+      (outdated === 0 ? '<span class="pos">✓ Todos os investimentos já têm saldo em ' + U.fmtMonthLong(mk) + '.</span>' : '<strong>' + outdated + '</strong> de ' + assets.length + ' investimento(s) sem saldo em ' + U.fmtMonthLong(mk) + '.') +
+      '<div class="faint">Abra o app de cada banco e digite o saldo atual. Campos vazios mantêm o último saldo. Registre aportes e resgates na coluna "Movimentação" para a rentabilidade ficar correta. O botão "=" repete o saldo anterior.</div></div>' +
+      '</div></div>' +
+      '<div class="card"><table class="update-table"><thead><tr><th>Investimento</th><th>Último saldo</th><th>Saldo atual</th><th>Movimentação (opcional)</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="toolbar" style="margin:16px 0 0"><span class="spacer"></span><button class="btn" data-action="clear-update">Limpar</button><button class="btn primary" id="save-update" data-action="save-update" disabled>Salvar atualizações</button></div></div>';
+
+    $('#upd-date').addEventListener('change', (e) => {
+      state.updateDate = e.target.value || U.today();
+      render();
+    });
+    $$('[data-balance],[data-amount],[data-kind]').forEach((el) => {
+      el.addEventListener('input', onUpdateInput);
+      el.addEventListener('change', onUpdateInput);
+    });
+    Object.keys(state.entries).forEach(updateDiff);
+    updateSaveButton();
+  }
+
+  function onUpdateInput(e) {
+    const el = e.target;
+    const id = el.dataset.balance || el.dataset.amount || el.dataset.kind;
+    const entry = (state.entries[id] = state.entries[id] || { kind: 'aporte' });
+    if (el.dataset.balance) entry.balance = el.value;
+    if (el.dataset.amount) entry.amount = el.value;
+    if (el.dataset.kind) entry.kind = el.value;
+    const row = $('tr[data-row="' + id + '"]');
+    if (row) row.classList.toggle('dirty', !!(entry.balance || entry.amount));
+    updateDiff(id);
+    updateSaveButton();
+  }
+
+  function updateDiff(id) {
+    const el = $('[data-diff="' + id + '"]');
+    const e = state.entries[id];
+    if (!el || !e) return;
+    const v = U.parseNumber(e.balance);
+    if (v === null || hidden()) {
+      el.textContent = '';
+      return;
+    }
+    const diff = v - store.currentValue(id);
+    el.textContent = U.signedMoney(diff);
+    el.className = 'faint num ' + cls(diff);
+  }
+
+  function pendingEntries() {
+    return Object.keys(state.entries).filter((id) => {
+      const e = state.entries[id];
+      return U.parseNumber(e.balance) !== null || (U.parseNumber(e.amount) || 0) > 0;
+    });
+  }
+
+  function updateSaveButton() {
+    const btn = $('#save-update');
+    if (!btn) return;
+    const n = pendingEntries().length;
+    btn.disabled = n === 0;
+    btn.textContent = n ? 'Salvar ' + n + ' atualização(ões)' : 'Salvar atualizações';
+  }
+
+  function saveUpdate() {
+    const date = state.updateDate;
+    const before = new P.Analytics(store.data).total();
+    let balances = 0, flows = 0;
+    pendingEntries().forEach((id) => {
+      const e = state.entries[id];
+      const v = U.parseNumber(e.balance);
+      if (v !== null) {
+        store.recordBalance(id, date, v, false);
+        balances++;
+      }
+      const amt = U.parseNumber(e.amount);
+      if (amt && amt > 0) {
+        store.recordMovement(id, e.kind || 'aporte', Math.abs(amt), date, '', false);
+        flows++;
+      }
+    });
+    state.entries = {};
+    store.commit();
+    const after = new P.Analytics(store.data).total();
+    toast(balances + ' saldo(s) e ' + flows + ' movimentação(ões) salvos.' + (hidden() ? '' : ' Patrimônio: ' + U.money(after) + ' (' + U.signedMoney(after - before) + ')'));
+  }
+
+  // =====================================================================
+  // Orçamento
+  // =====================================================================
+
+  function renderCashflow(view) {
+    const txs = store.data.transactions;
+    const mk = state.cashMonth;
+    const items = txs.filter((t) => U.monthKey(t.date) === mk);
+    const income = items.filter((t) => t.income).reduce((a, t) => a + t.amount, 0);
+    const expense = items.filter((t) => !t.income).reduce((a, t) => a + t.amount, 0);
+    const balance = income - expense;
+
+    const byCat = {};
+    items.filter((t) => !t.income).forEach((t) => {
+      const c = P.categoryById(t.category);
+      byCat[c.id] = byCat[c.id] || { label: c.title, color: c.color, value: 0 };
+      byCat[c.id].value += t.amount;
+    });
+    const cats = Object.values(byCat).sort((a, b) => b.value - a.value);
+    cats.forEach((c) => (c.share = expense ? c.value / expense : 0));
+
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const m = U.addMonths(mk, -i);
+      const list = txs.filter((t) => U.monthKey(t.date) === m);
+      months.push({ month: m, income: list.filter((t) => t.income).reduce((a, t) => a + t.amount, 0), expense: list.filter((t) => !t.income).reduce((a, t) => a + t.amount, 0) });
+    }
+
+    const days = {};
+    items.forEach((t) => (days[t.date] = days[t.date] || []).push(t));
+    const dayKeys = Object.keys(days).sort().reverse();
+
+    view.innerHTML =
+      '<div class="toolbar"><button class="btn small" data-action="cash-prev">‹</button><strong style="min-width:170px;text-align:center">' + U.fmtMonthLong(mk) + '</strong><button class="btn small" data-action="cash-next">›</button>' +
+      '<span class="spacer"></span><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
+      '<div class="grid">' +
+      '<section class="card span-12"><div class="kpi-row" style="margin:0;padding:0;border:0">' +
+      kpi('Receitas', '<span class="pos">' + money(income) + '</span>') +
+      kpi('Despesas', '<span class="neg">' + money(expense) + '</span>') +
+      kpi('Saldo do mês', '<span class="' + cls(balance) + '">' + money(balance) + '</span>') +
+      (income > 0 ? kpi('Taxa de poupança', U.pct(balance / income)) : '') +
+      '</div>' +
+      (income > 0 ? '<div class="progress" style="margin-top:14px"><span style="width:' + Math.min(100, (expense / income) * 100).toFixed(1) + '%;background:' + (expense > income ? 'var(--red)' : 'var(--orange)') + '"></span></div><div class="faint" style="margin-top:6px">Você gastou ' + U.pct(expense / income) + ' do que recebeu.</div>' : '') +
+      '</section>' +
+      '<section class="card span-5"><h3 class="card-title">Gastos por categoria</h3>' +
+      (cats.length
+        ? '<div class="chart-box donut" style="margin-top:10px"><canvas id="ch-cats"></canvas></div><div class="list" style="margin-top:10px">' +
+          cats.map((c) => '<div class="row"><i class="dot" style="background:' + c.color + '"></i><div class="grow title">' + esc(c.label) + '</div><div class="num">' + money(c.value) + '</div><div class="muted num" style="width:60px;text-align:right">' + U.pct(c.share) + '</div></div>').join('') +
+          '</div>'
+        : '<p class="muted">Nenhuma despesa neste mês.</p>') +
+      '</section>' +
+      '<section class="card span-7"><h3 class="card-title">Últimos 6 meses</h3><div class="chart-box" style="margin-top:10px"><canvas id="ch-cash"></canvas></div></section>' +
+      '<section class="card span-12"><h3 class="card-title">Lançamentos</h3>' +
+      (dayKeys.length
+        ? dayKeys
+            .map(
+              (d) =>
+                '<div class="group-head" style="margin-top:12px">' + U.fmtDate(d) + '</div><div class="list">' +
+                days[d]
+                  .sort((a, b) => b.amount - a.amount)
+                  .map((t) => {
+                    const c = P.categoryById(t.category);
+                    return '<div class="row clickable" data-action="edit-tx" data-id="' + t.id + '">' + badge(c.title, c.color) + '<div class="grow"><div class="title">' + esc(t.note || c.title) + '</div><div class="sub">' + esc(c.title) + '</div></div><div class="num ' + (t.income ? 'pos' : '') + '" style="font-weight:600">' + (t.income ? '+' : '−') + money(t.amount) + '</div></div>';
+                  })
+                  .join('') +
+                '</div>'
+            )
+            .join('')
+        : '<p class="muted">Nenhum lançamento neste mês. Use "+ Despesa" ou "+ Receita".</p>') +
+      '</section></div>';
+
+    if (cats.length) C.donut($('#ch-cats'), cats, hidden());
+    C.cashBars($('#ch-cash'), months, hidden());
+  }
+
+  // =====================================================================
+  // Ajustes
+  // =====================================================================
+
+  function renderSettings(view) {
+    const d = store.data;
+    const bench = d.benchmarks || {};
+    view.innerHTML =
+      '<div class="grid">' +
+      '<section class="card span-6"><h3 class="card-title">Onde ficam seus dados</h3><p><strong>' + esc(store.backend.label) + '</strong></p><p class="muted" id="storage-info">…</p>' +
+      (store.backend.id === 'desktop' ? '<p><button class="btn small" data-action="open-data-folder">Abrir pasta dos dados</button> <span class="faint">Uma cópia de segurança é feita automaticamente por dia.</span></p>' : '') +
+      '<div class="faint">Nenhuma senha de banco é pedida: você informa os saldos ou importa sua planilha.</div></section>' +
+      '<section class="card span-6"><h3 class="card-title">Meta de patrimônio</h3><div class="field" style="margin-top:10px"><label for="goal-input">Valor da meta (R$)</label>' +
+      '<div style="display:flex;gap:8px"><input id="goal-input" class="money-input" inputmode="decimal" placeholder="Ex.: 1.000.000" value="' + (d.settings.goal ? U.editable(d.settings.goal) : '') + '"><button class="btn primary" data-action="save-goal">Salvar</button></div>' +
+      '<div class="hint">Aparece no Início com o progresso e a estimativa de quando você chega lá. Deixe vazio para ocultar.</div></div></section>' +
+      '<section class="card span-6"><div class="card-head"><h3 class="card-title">Bancos e corretoras</h3><button class="btn small" data-action="new-institution">+ Adicionar</button></div><div class="list">' +
+      (d.institutions.length
+        ? d.institutions
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((i) => {
+              const n = d.assets.filter((a) => a.institutionId === i.id && !a.archived).length;
+              const total = d.assets.filter((a) => a.institutionId === i.id).reduce((acc, a) => acc + store.currentValue(a.id), 0);
+              return '<div class="row">' + badge(i.name, i.color, true) + '<div class="grow"><div class="title">' + esc(i.name) + '</div><div class="sub">' + n + ' investimento(s) ativo(s)</div></div><div class="num muted">' + money(total) + '</div>' +
+                '<button class="btn small" data-action="edit-institution" data-id="' + i.id + '">Editar</button><button class="icon-btn" title="Excluir" data-action="delete-institution" data-id="' + i.id + '">×</button></div>';
+            })
+            .join('')
+        : '<p class="muted">Nenhuma instituição cadastrada.</p>') +
+      '</div></section>' +
+      '<section class="card span-6"><h3 class="card-title">Planilhas</h3><p class="muted">Traga sua planilha do Excel ou Google Planilhas salvando-a como CSV.</p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" data-action="import-csv">Importar planilha (CSV)</button><button class="btn" data-action="csv-help">Como preparar a planilha</button></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="export-csv"' + (d.assets.length ? '' : ' disabled') + '>Exportar investimentos</button><button class="btn" data-action="export-tx"' + (d.transactions.length ? '' : ' disabled') + '>Exportar orçamento</button></div></section>' +
+      '<section class="card span-6"><h3 class="card-title">Backup</h3><p class="muted">Um arquivo com todos os dados. Serve também para levar seus dados entre a versão Windows e a versão web.</p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="export-json">Exportar backup (.json)</button><button class="btn" data-action="import-json">Restaurar backup</button></div></section>' +
+      '<section class="card span-6"><h3 class="card-title">Indicadores (CDI e IPCA)</h3><p class="muted">Dados públicos do Banco Central, usados para comparar a rentabilidade.</p>' +
+      '<p>Última atualização: <strong>' + (bench.updated ? new Date(bench.updated).toLocaleString('pt-BR') : 'nunca') + '</strong></p>' +
+      (state.benchError ? '<p class="neg" style="font-size:13px">' + esc(state.benchError) + '</p>' : '') +
+      '<button class="btn" data-action="refresh-bench"' + (state.benchLoading ? ' disabled' : '') + '>' + (state.benchLoading ? 'Atualizando…' : 'Atualizar agora') + '</button></section>' +
+      '<section class="card span-12"><h3 class="card-title">Dados</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-action="sample">Carregar dados de exemplo</button><button class="btn danger" data-action="wipe">Apagar todos os dados</button></div></section>' +
+      '</div>';
+    if (store.backend.info) {
+      store.backend
+        .info()
+        .then((info) => {
+          const el = $('#storage-info');
+          if (!el) return;
+          el.innerHTML = info.url ? 'Planilha: <a href="' + esc(info.url) + '" target="_blank" rel="noopener">' + esc(info.name || 'abrir') + '</a>' : esc(info.location || '');
+        })
+        .catch(() => {});
+    }
+  }
+
+  async function refreshBenchmarks(force) {
+    const b = store.data.benchmarks || {};
+    const fresh = b.updated && Date.now() - new Date(b.updated).getTime() < 12 * 3600 * 1000 && Object.keys(b.cdi || {}).length;
+    if (!force && fresh) return;
+    if (!store.backend.fetchSeries) return;
+    state.benchLoading = true;
+    if (state.view === 'settings') render();
+    try {
+      const [cdi, ipca] = await Promise.all([store.backend.fetchSeries(4391), store.backend.fetchSeries(433)]);
+      state.benchError = null;
+      store.setBenchmarks(P.parseSeries(cdi), P.parseSeries(ipca));
+      if (force) toast('CDI e IPCA atualizados.');
+    } catch (e) {
+      console.warn(e);
+      state.benchError = 'Não foi possível atualizar CDI/IPCA agora. Verifique sua conexão.';
+      queueRender();
+    } finally {
+      state.benchLoading = false;
+      queueRender();
+    }
+  }
+
+  function pickFile(accept, handler) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const buf = new Uint8Array(reader.result);
+        let text = new TextDecoder('utf-8').decode(buf);
+        // Planilhas salvas pelo Excel no Windows costumam vir em Windows-1252.
+        if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
+        handler(text, file.name);
+      };
+      reader.readAsArrayBuffer(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  function importCSV(text) {
+    try {
+      const summary = P.csv.importInto(store, text);
+      openModal({ title: 'Importação concluída', body: '<p>' + esc(P.csv.describe(summary)) + '</p>', actions: [{ label: 'Ver carteira', cls: 'primary', onClick: (close) => (close(), go('portfolio')) }] });
+    } catch (e) {
+      openModal({ title: 'Não foi possível importar', body: '<p>' + esc(e.message) + '</p><p class="muted">Veja "Como preparar a planilha" para os formatos aceitos.</p>' });
+    }
+  }
+
+  async function importJSON(text) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      return openModal({ title: 'Arquivo inválido', body: '<p>Esse arquivo não é um backup do Patrimônio.</p>' });
+    }
+    if (!parsed || !Array.isArray(parsed.assets)) return openModal({ title: 'Arquivo inválido', body: '<p>Esse arquivo não é um backup do Patrimônio.</p>' });
+    const ok = await confirmDialog('Restaurar backup?', 'Os dados atuais serão substituídos pelos do arquivo (' + parsed.assets.length + ' investimentos).', 'Restaurar', true);
+    if (!ok) return;
+    store.replaceAll(parsed);
+    toast('Backup restaurado.');
+  }
+
+  function exportFile(name, content) {
+    store.backend
+      .saveFile(name, content)
+      .then((res) => {
+        if (res && res.url) {
+          openModal({ title: 'Arquivo exportado', body: '<p>' + esc(res.message) + '</p><p><a class="btn primary" href="' + esc(res.url) + '" target="_blank" rel="noopener">Abrir no Google Drive</a></p>' });
+        } else if (res && res.message) toast(res.message);
+      })
+      .catch((e) => toast('Erro ao exportar: ' + (e.message || e)));
+  }
+
+  function openCsvHelp() {
+    openModal({
+      title: 'Como preparar sua planilha',
+      wide: true,
+      body:
+        '<p>No Excel use <strong>Arquivo › Salvar como › CSV</strong>. No Google Planilhas, <strong>Arquivo › Fazer download › CSV</strong>.</p>' +
+        '<h3 class="card-title" style="margin-top:14px">Formato 1 — saldos por mês</h3><p class="muted">Uma linha por investimento e uma coluna por mês. É o formato mais comum de planilha de patrimônio. O primeiro saldo de cada investimento é considerado aporte inicial.</p>' +
+        '<pre class="code">' + esc(P.csv.TEMPLATE_MONTHS) + '</pre><button class="btn small" data-action="download-template" data-id="meses">Baixar modelo</button>' +
+        '<h3 class="card-title" style="margin-top:18px">Formato 2 — lançamentos</h3><p class="muted">Uma linha por data e investimento, com aportes, resgates e proventos, para uma rentabilidade exata.</p>' +
+        '<pre class="code">' + esc(P.csv.TEMPLATE_ROWS) + '</pre><button class="btn small" data-action="download-template" data-id="lancamentos">Baixar modelo</button>' +
+        '<h3 class="card-title" style="margin-top:18px">Regras</h3><ul class="muted">' +
+        '<li>Separador ponto e vírgula (;), vírgula ou tab.</li>' +
+        '<li>Datas: 31/01/2026 ou 2026-01-31. No formato 1: 01/2026, jan/26 ou Janeiro 2026.</li>' +
+        '<li>Valores: 1.234,56 ou 1234.56, com ou sem R$.</li>' +
+        '<li>Colunas reconhecidas: data, instituição/banco/corretora, ativo/investimento, classe/tipo, saldo/valor, aporte, resgate, proventos, ticker.</li>' +
+        '<li>Se a classe não for informada, o app tenta adivinhar pelo nome (CDB, Tesouro, FII…).</li>' +
+        '<li>Importar de novo o mesmo mês substitui o saldo, sem duplicar.</li></ul>',
+    });
+  }
+
+  // =====================================================================
+  // Modais e formulários
+  // =====================================================================
+
+  function openModal(opts) {
+    const root = $('#modal-root');
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-backdrop';
+    const actions = opts.actions || [{ label: 'OK', cls: 'primary', onClick: (close) => close() }];
+    wrap.innerHTML =
+      '<form class="modal' + (opts.wide ? ' wide' : '') + '" novalidate>' +
+      '<div class="modal-head"><h2>' + esc(opts.title) + '</h2><button type="button" class="icon-btn" data-close aria-label="Fechar">×</button></div>' +
+      '<div class="modal-body">' + opts.body + '</div>' +
+      '<div class="modal-foot">' +
+      actions.map((a, i) => '<button type="' + (a.submit ? 'submit' : 'button') + '" class="btn ' + (a.cls || '') + (a.left ? ' left' : '') + '" data-act="' + i + '">' + esc(a.label) + '</button>').join('') +
+      '</div></form>';
+    root.appendChild(wrap);
+    const form = $('form', wrap);
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      wrap.remove();
+      document.removeEventListener('keydown', onKey);
+      if (opts.onClose) opts.onClose();
+    };
+    const onKey = (e) => e.key === 'Escape' && close();
+    document.addEventListener('keydown', onKey);
+    wrap.addEventListener('mousedown', (e) => e.target === wrap && close());
+    $('[data-close]', wrap).addEventListener('click', close);
+    actions.forEach((a, i) => {
+      if (a.submit) return;
+      $('[data-act="' + i + '"]', wrap).addEventListener('click', () => (a.onClick ? a.onClick(close, form) : close()));
+    });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const a = actions.find((x) => x.submit);
+      if (a) a.onClick(close, form);
+    });
+    if (opts.onOpen) opts.onOpen(form, close);
+    const focusable = $('input:not([type=hidden]), select, textarea', form);
+    if (focusable) setTimeout(() => focusable.focus(), 30);
+    return close;
+  }
+
+  function confirmDialog(title, message, okLabel, danger) {
+    return new Promise((resolve) => {
+      let result = false;
+      openModal({
+        title,
+        body: '<p>' + esc(message) + '</p>',
+        onClose: () => resolve(result),
+        actions: [
+          { label: 'Cancelar', onClick: (c) => c() },
+          { label: okLabel || 'OK', cls: danger ? 'danger' : 'primary', onClick: (c) => ((result = true), c()) },
+        ],
+      });
+    });
+  }
+
+  function field(label, input, hint) {
+    return '<div class="field"><label>' + esc(label) + '</label>' + input + (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>';
+  }
+  const val = (form, name) => {
+    const el = form.elements[name];
+    return el ? el.value.trim() : '';
+  };
+
+  function institutionOptions(selected) {
+    return (
+      '<option value="">Selecione…</option>' +
+      store.data.institutions
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((i) => '<option value="' + i.id + '"' + (i.id === selected ? ' selected' : '') + '>' + esc(i.name) + '</option>')
+        .join('') +
+      '<option value="__new">+ Nova instituição…</option>'
+    );
+  }
+
+  function openAssetForm(asset) {
+    const isNew = !asset;
+    const a = asset || { name: '', classId: 'rendaFixa', institutionId: store.data.institutions.length === 1 ? store.data.institutions[0].id : '', ticker: '', indexer: '', maturity: null, notes: '' };
+    const body =
+      field('Nome do investimento', '<input type="text" name="name" required placeholder="Ex.: CDB Banco X 2027" value="' + esc(a.name) + '">') +
+      '<div class="form-row">' +
+      field('Classe', '<select name="classId">' + P.ASSET_CLASSES.map((c) => '<option value="' + c.id + '"' + (c.id === a.classId ? ' selected' : '') + '>' + esc(c.title) + '</option>').join('') + '</select>', '<span id="class-hint">' + esc(P.classById(a.classId).examples) + '</span>') +
+      field('Instituição', '<select name="institutionId">' + institutionOptions(a.institutionId) + '</select><input type="text" name="newInstitution" placeholder="Nome do banco ou corretora" style="display:none;margin-top:6px">') +
+      '</div>' +
+      (isNew
+        ? '<div class="form-row">' + field('Saldo atual (R$)', '<input class="money-input" inputmode="decimal" name="initialValue" placeholder="0,00">', 'Registrado como aporte inicial.') + field('Data do saldo', '<input type="date" name="initialDate" value="' + U.today() + '">') + '</div>'
+        : '') +
+      '<div class="form-row">' +
+      field('Indexador (opcional)', '<input type="text" name="indexer" placeholder="110% CDI, IPCA + 6%" value="' + esc(a.indexer) + '">') +
+      field('Código / ticker (opcional)', '<input type="text" name="ticker" placeholder="PETR4" value="' + esc(a.ticker) + '">') +
+      '</div>' +
+      field('Vencimento (opcional)', '<input type="date" name="maturity" value="' + (a.maturity || '') + '">') +
+      field('Observações', '<textarea name="notes" rows="2">' + esc(a.notes) + '</textarea>');
+
+    openModal({
+      title: isNew ? 'Novo investimento' : 'Editar investimento',
+      body,
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Salvar',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            const name = val(form, 'name');
+            if (!name) return form.elements.name.focus();
+            let institutionId = val(form, 'institutionId');
+            if (institutionId === '__new') {
+              const n = val(form, 'newInstitution');
+              if (!n) return form.elements.newInstitution.focus();
+              institutionId = store.findOrCreateInstitution(n, false).inst.id;
+            }
+            const payload = { id: asset ? asset.id : undefined, name, classId: val(form, 'classId'), institutionId, ticker: val(form, 'ticker'), indexer: val(form, 'indexer'), maturity: val(form, 'maturity') || null, notes: val(form, 'notes') };
+            const saved = store.saveAsset(payload, isNew ? U.parseNumber(val(form, 'initialValue')) : 0, isNew ? val(form, 'initialDate') || U.today() : null);
+            close();
+            toast(isNew ? 'Investimento adicionado.' : 'Alterações salvas.');
+            if (isNew && state.view === 'dashboard') return;
+            if (isNew) go('asset', saved.id);
+          },
+        },
+      ],
+      onOpen: (form) => {
+        const sel = form.elements.institutionId;
+        const toggle = () => (form.elements.newInstitution.style.display = sel.value === '__new' ? 'block' : 'none');
+        sel.addEventListener('change', () => {
+          toggle();
+          if (sel.value === '__new') form.elements.newInstitution.focus();
+        });
+        if (!store.data.institutions.length) {
+          sel.value = '__new';
+          toggle();
+        }
+        form.elements.classId.addEventListener('change', () => ($('#class-hint').textContent = P.classById(form.elements.classId.value).examples));
+      },
+    });
+  }
+
+  function openInstitutionForm(inst) {
+    const isNew = !inst;
+    const used = new Set(store.data.institutions.map((i) => U.norm(i.name)));
+    const color = inst ? inst.color : P.PALETTE[store.data.institutions.length % P.PALETTE.length];
+    const presets = P.INSTITUTION_PRESETS.filter((p) => !used.has(U.norm(p.name)));
+    openModal({
+      title: isNew ? 'Nova instituição' : 'Editar instituição',
+      body:
+        '<div class="form-row" style="grid-template-columns:1fr 90px">' +
+        field('Nome', '<input type="text" name="name" required placeholder="Nome do banco ou corretora" value="' + esc(inst ? inst.name : '') + '">') +
+        field('Cor', '<input type="color" name="color" value="' + esc(color) + '" style="height:40px;width:100%;padding:2px">') +
+        '</div>' +
+        (isNew && presets.length ? '<div class="field"><label>Sugestões</label><div class="chips">' + presets.map((p) => '<button type="button" class="chip" data-preset="' + esc(p.name) + '" data-color="' + p.color + '"><i class="dot" style="background:' + p.color + '"></i>' + esc(p.name) + '</button>').join('') + '</div></div>' : ''),
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Salvar',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            const name = val(form, 'name');
+            if (!name) return form.elements.name.focus();
+            store.saveInstitution({ id: inst ? inst.id : undefined, name, color: form.elements.color.value.toUpperCase() });
+            close();
+          },
+        },
+      ],
+      onOpen: (form) => {
+        $$('[data-preset]', form).forEach((b) =>
+          b.addEventListener('click', () => {
+            form.elements.name.value = b.dataset.preset;
+            form.elements.color.value = b.dataset.color.toLowerCase();
+          })
+        );
+      },
+    });
+  }
+
+  function openQuickUpdate(asset) {
+    openModal({
+      title: asset.name,
+      body:
+        field('Data', '<input type="date" name="date" value="' + U.today() + '">') +
+        field('Novo saldo (R$)', '<input class="money-input" inputmode="decimal" name="balance" placeholder="' + esc(U.editable(store.currentValue(asset.id))) + '">', 'Último saldo: ' + U.money(store.currentValue(asset.id)) + '. Deixe vazio para registrar só a movimentação.') +
+        '<div class="form-row">' +
+        field('Movimentação (opcional)', '<select name="kind">' + P.MOVEMENT_KINDS.map((k) => '<option value="' + k.id + '">' + k.title + '</option>').join('') + '</select>') +
+        field('Valor (R$)', '<input class="money-input" inputmode="decimal" name="amount" placeholder="0,00">') +
+        '</div>' +
+        field('Observação', '<input type="text" name="note">') +
+        '<label class="check"><input type="checkbox" name="addToBalance"> Somar o aporte ao último saldo (quando não souber o saldo novo)</label>',
+      actions: [
+        { label: 'Cancelar', onClick: (c) => c() },
+        {
+          label: 'Salvar',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            const date = val(form, 'date') || U.today();
+            let bal = U.parseNumber(val(form, 'balance'));
+            const amt = U.parseNumber(val(form, 'amount'));
+            const kind = val(form, 'kind');
+            if (bal === null && form.elements.addToBalance.checked && amt > 0) {
+              bal = store.currentValue(asset.id) + (kind === 'aporte' ? amt : kind === 'resgate' ? -amt : 0);
+            }
+            if (bal === null && !(amt > 0)) return form.elements.balance.focus();
+            if (bal !== null) store.recordBalance(asset.id, date, bal, false);
+            if (amt > 0) store.recordMovement(asset.id, kind, Math.abs(amt), date, val(form, 'note'), false);
+            store.commit();
+            close();
+            toast('Investimento atualizado.');
+          },
+        },
+      ],
+    });
+  }
+
+  function openTransactionForm(tx, income) {
+    const isNew = !tx;
+    const t = tx || { date: U.monthKey(U.today()) === state.cashMonth ? U.today() : state.cashMonth + '-01', amount: '', category: income ? 'salario' : 'mercado', note: '' };
+    const catOptions = (inc, sel) => P.CASH_CATEGORIES.filter((c) => c.income === inc).map((c) => '<option value="' + c.id + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.title) + '</option>').join('');
+    const actions = [];
+    if (!isNew) {
+      actions.push({
+        label: 'Excluir',
+        cls: 'danger',
+        left: true,
+        onClick: (close) => {
+          store.deleteTransaction(tx.id);
+          close();
+        },
+      });
+    }
+    actions.push({ label: 'Cancelar', onClick: (c) => c() });
+    actions.push({
+      label: 'Salvar',
+      cls: 'primary',
+      submit: true,
+      onClick: (close, form) => {
+        const amount = U.parseNumber(val(form, 'amount'));
+        if (!(amount > 0)) return form.elements.amount.focus();
+        store.saveTransaction({ id: tx ? tx.id : undefined, date: val(form, 'date') || U.today(), amount: Math.abs(amount), category: val(form, 'category'), note: val(form, 'note') });
+        close();
+      },
+    });
+    openModal({
+      title: isNew ? (income ? 'Nova receita' : 'Nova despesa') : 'Editar lançamento',
+      body:
+        '<div class="field"><label>Tipo</label><div class="seg" id="tx-type"><button type="button" data-inc="0" class="' + (!income ? 'on' : '') + '">Despesa</button><button type="button" data-inc="1" class="' + (income ? 'on' : '') + '">Receita</button></div></div>' +
+        '<div class="form-row">' + field('Valor (R$)', '<input class="money-input" inputmode="decimal" name="amount" placeholder="0,00" value="' + esc(tx ? U.editable(tx.amount) : '') + '">') + field('Data', '<input type="date" name="date" value="' + t.date + '">') + '</div>' +
+        field('Categoria', '<select name="category">' + catOptions(income, t.category) + '</select>') +
+        field('Descrição', '<input type="text" name="note" value="' + esc(t.note) + '">'),
+      actions,
+      onOpen: (form) => {
+        $$('#tx-type button', form).forEach((b) =>
+          b.addEventListener('click', () => {
+            const inc = b.dataset.inc === '1';
+            $$('#tx-type button', form).forEach((x) => x.classList.toggle('on', x === b));
+            form.elements.category.innerHTML = catOptions(inc, inc ? 'salario' : 'mercado');
+            $('.modal-head h2', form).textContent = isNew ? (inc ? 'Nova receita' : 'Nova despesa') : 'Editar lançamento';
+          })
+        );
+      },
+    });
+  }
+
+  P.app = { init, state, get store() { return store; } };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})(window);
+
+</script>
