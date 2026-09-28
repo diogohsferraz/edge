@@ -124,6 +124,9 @@ function getData() {
       if (k === 'customCategories') {
         try { data.customCategories = JSON.parse(r[1]); } catch (e) { data.customCategories = []; }
       }
+      if (k === 'plan') {
+        try { data.settings.plan = JSON.parse(r[1]); } catch (e) { /* ignora */ }
+      }
       if (k === 'categoryRules') {
         try { data.settings.categoryRules = JSON.parse(r[1]); } catch (e) { data.settings.categoryRules = {}; }
       }
@@ -170,7 +173,8 @@ function saveData(json) {
     var config = ss.getSheetByName(CONFIG_TAB) || ss.insertSheet(CONFIG_TAB);
     config.clearContents();
     var s = data.settings || {};
-    config.getRange(1, 1, 7, 2).setValues([
+    config.getRange(1, 1, 8, 2).setValues([
+      ['plan', JSON.stringify(s.plan || {})],
       ['installmentRules', JSON.stringify(s.installmentRules || {})],
       ['goal', Number(s.goal) || 0],
       ['hideValues', s.hideValues === true],

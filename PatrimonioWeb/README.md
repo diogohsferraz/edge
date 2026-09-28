@@ -18,7 +18,17 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
   - Distribuição por classe de ativo e por instituição.
   - Rentabilidade mensal e acumulada comparada com **CDI** e **IPCA** (API do Banco Central), com o "% do CDI".
   - Aportes, resgates e proventos dos últimos 12 meses, totais por banco e meta de patrimônio com estimativa de prazo.
-- **Carteira:** investimentos agrupados por instituição ou por classe, com busca, detalhe de cada ativo (gráfico, histórico, vencimento) e opção de arquivar.
+  - **Filtros dinâmicos:** filtre por classe e instituição, ou clique na rosca, no comparativo e nas listas. A tela inteira (resumo, evolução, rentabilidade, aportes) passa a mostrar só aquela parte da carteira.
+  - Evolução empilhada por classe, instituição ou investimento, e **Comparativo** da rentabilidade de cada grupo no período.
+  - **Onde aportar:**
+    - escolha um perfil (Conservador, Moderado, Arrojado) ou monte sua alocação-alvo por classe;
+    - o app divide o aporte do mês entre as classes abaixo do alvo, sem precisar vender nada, e indica os seus investimentos para reforçar ou ideias de investimentos que você ainda não tem (Tesouro IPCA+, FIIs, ETFs…);
+    - mostra quanto tempo falta para a meta mantendo a carteira, seguindo a sugestão, aportando 25% a mais ou aplicando o dinheiro parado em conta;
+    - avisa sobre concentração num único investimento e sobre valores acima do limite do FGC por instituição;
+    - a rentabilidade esperada de cada classe parte do CDI e pode ser ajustada. É uma estimativa educativa, não recomendação de investimento.
+- **Carteira:** investimentos agrupados por instituição ou por classe, com busca, filtros e detalhe de cada ativo (gráfico, histórico, vencimento) e opção de arquivar.
+  - Marque ✓ nos investimentos (ou "✓ todos" de um grupo) para compará-los **somados ou separados**, em R$ ou em rentabilidade acumulada (%), com a tabela-resumo do período.
+  - "Analisar no Início" leva a seleção para os painéis do Início.
 - **Atualizar:** o "fechamento do mês". Uma tabela com todos os investimentos agrupados por banco, onde você digita os saldos de uma vez e, se quiser, os aportes e resgates. O botão "=" repete o saldo anterior.
 - **Orçamento:** receitas e despesas por categoria, taxa de poupança e comparativo de 6 meses.
   - **Interativo:** clique na rosca, nas categorias, nos totais, nas barras de mês ou de dia para filtrar a tela inteira.
@@ -91,6 +101,7 @@ web/
     ├── csv.js        # importação e exportação de planilhas
     ├── xlsx.js       # leitor de arquivos do Excel (.xlsx)
     ├── blocks.js     # planilha de evolução patrimonial em blocos por data
+    ├── planner.js    # "Onde aportar": alocação-alvo, divisão do aporte e prazo da meta
     ├── statement.js  # extrato bancário (CSV)
     ├── invoice.js    # fatura do cartão (PDF)
     ├── backends.js   # Planilha Google / arquivo no Windows / navegador

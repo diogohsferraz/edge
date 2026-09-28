@@ -98,17 +98,30 @@
     return end < this.today ? end : this.today;
   };
 
+  /** Mesma análise restrita a parte da carteira (filtro por classe, instituição ou investimentos). */
+  Analytics.prototype.subset = function (pred) {
+    const s = Object.create(Analytics.prototype);
+    s.today = this.today;
+    s.assets = this.assets.filter(pred);
+    return s;
+  };
+
   Analytics.prototype.evolution = function (limit) {
     return this.months(limit).map((mk) => {
       const cut = this.cutoff(mk);
       const byClass = {};
+      const byInst = {};
+      const byAsset = {};
       let total = 0;
       this.assets.forEach((a) => {
         const v = this.valueOf(a, cut);
         total += v;
         byClass[a.classId] = (byClass[a.classId] || 0) + v;
+        const ik = a.institutionId || '_';
+        byInst[ik] = (byInst[ik] || 0) + v;
+        byAsset[a.id] = v;
       });
-      return { month: mk, total, invested: this.invested(cut), byClass };
+      return { month: mk, total, invested: this.invested(cut), byClass, byInst, byAsset };
     });
   };
 

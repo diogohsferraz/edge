@@ -240,6 +240,7 @@
       });
     const s = raw.settings || {};
     d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true', installmentRules: s.installmentRules && typeof s.installmentRules === 'object' ? s.installmentRules : {} };
+    if (s.plan && typeof s.plan === 'object') d.settings.plan = s.plan;
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;

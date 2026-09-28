@@ -89,8 +89,10 @@
     });
   };
 
-  C.stacked = function (canvas, points, classes, hidden) {
+  /** Áreas empilhadas. groups: [{id, title, color}]; key: 'byClass' | 'byInst' | 'byAsset'. */
+  C.stacked = function (canvas, points, classes, hidden, key) {
     const t = C.theme();
+    key = key || 'byClass';
     const opts = base(hidden, t, U.money);
     opts.scales.y.stacked = true;
     opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
@@ -100,7 +102,7 @@
         labels: points.map((p) => U.fmtMonth(p.month)),
         datasets: classes.map((c) => ({
           label: c.title,
-          data: points.map((p) => p.byClass[c.id] || 0),
+          data: points.map((p) => (c.ids ? c.ids.reduce((acc, id) => acc + (p[key][id] || 0), 0) : p[key][c.id] || 0)),
           borderColor: c.color,
           backgroundColor: c.color + 'CC',
           fill: true,
@@ -203,6 +205,80 @@
         ],
       },
       options: opts,
+    });
+  };
+
+  /**
+   * Várias linhas lado a lado (investimentos "separados").
+   * series: [{label, color, data: [valor|null por rótulo]}]; percent: valores em fração (0,05 = 5%).
+   */
+  C.lines = function (canvas, labels, series, hidden, percent) {
+    const t = C.theme();
+    const fmt = percent ? pctTick : U.money;
+    const opts = base(percent ? false : hidden, t, fmt);
+    opts.scales.y.beginAtZero = false;
+    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    return make(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: series.map((s) => ({
+          label: s.label,
+          data: s.data.map((v) => (v === null || v === undefined ? null : percent ? v * 100 : v)),
+          borderColor: s.color,
+          backgroundColor: s.color,
+          borderWidth: s.width || 2,
+          borderDash: s.dash,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          spanGaps: true,
+        })),
+      },
+      options: opts,
+    });
+  };
+
+  /**
+   * Barras horizontais. rows: [{key, label, color, values: [..por dataset]}];
+   * opts: { datasets: [{label, color?}], percent, selected, onClick(row) }.
+   */
+  C.hbars = function (canvas, rows, hidden, opts) {
+    const t = C.theme();
+    opts = opts || {};
+    const fmt = opts.percent ? (v) => pctTick(v) : U.money;
+    const datasets = (opts.datasets || [{ label: 'Valor' }]).map((d, i) => ({
+      label: d.label,
+      data: rows.map((r) => (opts.percent ? r.values[i] * 100 : r.values[i])),
+      backgroundColor: rows.map((r) => {
+        const c = d.color || (typeof r.color === 'function' ? r.color(r.values[i]) : r.color);
+        return opts.selected && r.key !== opts.selected ? dim(c) : c;
+      }),
+      borderRadius: 4,
+      barPercentage: 0.8,
+      categoryPercentage: 0.8,
+    }));
+    const hideValues = hidden && !opts.percent;
+    return make(canvas, {
+      type: 'bar',
+      data: { labels: rows.map((r) => r.label), datasets },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 250 },
+        interaction: { mode: 'nearest', axis: 'y', intersect: false },
+        onClick: opts.onClick ? (evt, els) => els.length && opts.onClick(rows[els[0].index]) : undefined,
+        onHover: opts.onClick ? pointer : undefined,
+        plugins: {
+          legend: { display: datasets.length > 1, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } },
+          tooltip: { callbacks: { label: (ctx) => ' ' + ctx.dataset.label + ': ' + (hideValues ? U.MASK : fmt(ctx.parsed.x)) } },
+        },
+        scales: {
+          x: { grid: { color: t.grid }, border: { display: false }, ticks: { color: t.text, callback: (v) => (opts.percent ? pctTick(v) : hideValues ? '' : U.compact(v)) } },
+          y: { grid: { display: false }, ticks: { color: t.text, autoSkip: false } },
+        },
+      },
     });
   };
 

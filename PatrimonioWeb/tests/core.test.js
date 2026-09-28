@@ -9,7 +9,7 @@ function loadCore() {
   const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, RegExp, TextDecoder, DecompressionStream };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'statement.js', 'invoice.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'planner.js', 'statement.js', 'invoice.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx, { filename: f });
   }
   return ctx.Patrimonio;
@@ -450,4 +450,78 @@ test('data de bloco com dia inválido vai para o último dia do mês', () => {
   assert.equal(P.blocks.parseDate('2020-07-06'), '2020-07-06');
   assert.equal(P.blocks.parseDate('Investimento'), null);
   assert.equal(P.institutionAlias('BB'), 'Banco do Brasil');
+});
+
+// ---- Onde aportar ----
+
+test('divide o aporte cobrindo primeiro as classes abaixo do alvo', () => {
+  const w = P.planner.normalizeTargets({ rendaFixa: 50, acoes: 30, exterior: 20 });
+  // Total depois do aporte: 10.000. Alvos: RF 5.000, ações 3.000, exterior 2.000.
+  const r = P.planner.recommend({ rendaFixa: 8000, acoes: 1000 }, w, 1000);
+  near(r.rendaFixa, 0);
+  near(r.acoes + r.exterior, 1000);
+  near(r.acoes / r.exterior, 2000 / 2000); // déficits: ações 2.000, exterior 2.000
+  // Aporte maior que os déficits: o que sobra segue os pesos.
+  const r2 = P.planner.recommend({ rendaFixa: 5000, acoes: 3000, exterior: 2000 }, w, 1000);
+  near(r2.rendaFixa, 500);
+  near(r2.acoes, 300);
+  near(r2.exterior, 200);
+  assert.deepEqual({ ...P.planner.recommend({ rendaFixa: 1 }, w, 0) }, {});
+});
+
+test('simulação do prazo da meta', () => {
+  const ret = { rendaFixa: 0.12, acoes: 0.16 };
+  assert.equal(P.planner.simulate({ rendaFixa: 1000 }, 0, ret, 500), 0);
+  // Sem rendimento: 10.000 + 1.000/mês chega a 22.000 em 12 meses.
+  assert.equal(P.planner.simulate({ rendaFixa: 10000 }, 1000, { rendaFixa: 0 }, 22000), 12);
+  const keep = P.planner.simulate({ rendaFixa: 100000 }, 2000, ret, 300000, null);
+  const follow = P.planner.simulate({ rendaFixa: 100000 }, 2000, ret, 300000, { rendaFixa: 0.5, acoes: 0.5 });
+  assert.ok(follow < keep, follow + ' < ' + keep);
+  assert.equal(P.planner.simulate({ rendaFixa: 1 }, 0, { rendaFixa: 0 }, 100, null, 24), null);
+});
+
+test('análise completa: sugestões, ideias de investimentos novos e alertas', () => {
+  const store = P.createStore(memoryBackend());
+  const bb = store.findOrCreateInstitution('BB', false).inst.id;
+  const d = '2026-01-31';
+  store.saveAsset({ name: 'LCA POS CDI', classId: 'rendaFixa', institutionId: bb }, 280000, d, false);
+  store.saveAsset({ name: 'Conta Corrente', classId: 'conta', institutionId: bb }, 40000, d, false);
+  store.saveAsset({ name: 'ITSA4', classId: 'acoes', institutionId: bb }, 10000, d, false);
+  store.setSetting('goal', 1000000);
+  store.setSetting('plan', { profile: 'moderado', monthly: 3000 });
+  const an = new P.Analytics(store.data, '2026-02-15');
+  const a = P.planner.analyze(store.data, an);
+  assert.equal(a.amount, 3000);
+  near(Object.values(a.rows).reduce((s, r) => s + r.aporte, 0), 3000);
+  const rf = a.rows.find((r) => r.classId === 'rendaFixa');
+  near(rf.aporte, 0); // renda fixa já passa do alvo
+  const tes = a.suggestions.find((s) => s.classId === 'tesouro');
+  assert.ok(tes && tes.aporte > 0 && tes.ideas.length && !tes.existing.length);
+  const acoes = a.suggestions.find((s) => s.classId === 'acoes');
+  assert.equal(acoes.existing[0].name, 'ITSA4');
+  assert.ok(a.projection.follow < a.projection.keep);
+  assert.ok(a.projection.idle > 0);
+  const kinds = a.alerts.map((x) => x.kind);
+  assert.ok(kinds.includes('fgc')); // 320 mil cobertos pelo FGC no mesmo banco
+  assert.ok(kinds.includes('concentration'));
+  assert.ok(kinds.includes('idle'));
+});
+
+test('subconjunto da análise e evolução por instituição e investimento', () => {
+  const store = P.createStore(memoryBackend());
+  const a1 = store.saveAsset({ name: 'A', classId: 'rendaFixa', institutionId: store.findOrCreateInstitution('X', false).inst.id }, 100, '2026-01-10', false);
+  store.saveAsset({ name: 'B', classId: 'acoes', institutionId: store.findOrCreateInstitution('Y', false).inst.id }, 50, '2026-01-10', false);
+  const an = new P.Analytics(store.data, '2026-02-15');
+  assert.equal(an.total(), 150);
+  const sub = an.subset((x) => x.classId === 'acoes');
+  assert.equal(sub.total(), 50);
+  assert.equal(an.total(), 150);
+  const ev = an.evolution();
+  assert.equal(ev[ev.length - 1].byAsset[a1.id], 100);
+  assert.equal(ev[ev.length - 1].byInst[a1.institutionId], 100);
+});
+
+test('plano de aportes sobrevive à normalização', () => {
+  const d = P.normalizeData({ settings: { plan: { profile: 'arrojado', monthly: 2000 } } });
+  assert.equal(d.settings.plan.profile, 'arrojado');
 });

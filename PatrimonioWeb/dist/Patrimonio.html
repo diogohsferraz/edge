@@ -226,6 +226,41 @@ svg { fill: currentColor; }
 .linklike:hover { color: var(--accent); }
 .group-head .linklike { font-weight: 650; }
 
+/* ---------- Filtros da carteira (Início e Carteira) ---------- */
+.pf-bar { margin: -4px 0 14px; }
+.pf-select { width: auto; min-width: 150px; max-width: 220px; padding: 6px 10px; border-radius: 99px; font-size: 13px; background: var(--surface); }
+.pf-select.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.pick {
+  width: 22px; height: 22px; flex-shrink: 0; border-radius: 7px; border: 1.5px solid var(--text-3);
+  background: transparent; color: transparent; font-size: 13px; line-height: 1; cursor: pointer; padding: 0;
+}
+.pick:hover { border-color: var(--accent); }
+.pick.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.row.picked { background: var(--accent-soft); }
+.group-head .linklike.on { color: var(--accent); }
+.row.selected { background: var(--accent-soft); }
+.row.dimmed { opacity: 0.5; }
+.ret-bar { height: 6px; border-radius: 99px; background: var(--fill); overflow: hidden; margin-top: 4px; }
+.ret-bar > span { display: block; height: 100%; border-radius: 99px; }
+
+/* ---------- Onde aportar ---------- */
+.advisor-grid { display: grid; grid-template-columns: 5fr 7fr; gap: 20px; align-items: start; }
+.advisor-grid h4, .advisor h4 { margin: 0 0 8px; font-size: 13px; font-weight: 650; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.03em; }
+.split-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.split-row:last-child { border-bottom: 0; }
+.split-row .top { display: flex; align-items: center; gap: 8px; }
+.split-row .top .grow { flex: 1; min-width: 0; font-weight: 600; }
+.split-row .amount { font-weight: 700; font-size: 16px; }
+.split-row .idea { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+.split-row .idea strong { color: var(--text); font-weight: 600; }
+.split-row .tag.new { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.alerts { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.alert-item { display: flex; gap: 8px; font-size: 13.5px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.alert-item .i { color: var(--orange); font-weight: 700; }
+.plan-table td { padding: 6px 8px; }
+.plan-table input { width: 90px; text-align: right; }
+.plan-sum.bad { color: var(--red); font-weight: 600; }
+
 /* ---------- Categorias ---------- */
 .cat-manage { align-items: flex-start; }
 .cat-manage .dot { margin-top: 6px; }
@@ -305,6 +340,7 @@ pre.code {
 /* ---------- Celular: barra inferior ---------- */
 @media (max-width: 900px) {
   .span-8, .span-7, .span-6, .span-5, .span-4 { grid-column: span 12; }
+  .advisor-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .sidebar {
@@ -322,6 +358,7 @@ pre.code {
   .kpi-value { font-size: 28px; }
   .form-row { grid-template-columns: 1fr; }
   .search { min-width: 0; flex: 1; }
+  .pf-select { flex: 1; min-width: 0; max-width: none; }
   .update-table:not(.statement-table) thead { display: none; }
   .update-table:not(.statement-table) tr:not(.inst) { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .update-table:not(.statement-table) tr:not(.inst) td { border: 0; padding: 2px 4px; }
@@ -887,6 +924,7 @@ pre.code {
       });
     const s = raw.settings || {};
     d.settings = { goal: num(s.goal), hideValues: s.hideValues === true || s.hideValues === 'true', categoryRules: s.categoryRules && typeof s.categoryRules === 'object' ? s.categoryRules : {}, cardItemized: s.cardItemized === true || s.cardItemized === 'true', installmentRules: s.installmentRules && typeof s.installmentRules === 'object' ? s.installmentRules : {} };
+    if (s.plan && typeof s.plan === 'object') d.settings.plan = s.plan;
     const b = raw.benchmarks || {};
     d.benchmarks = { cdi: b.cdi || {}, ipca: b.ipca || {}, updated: b.updated || null };
     return d;
@@ -1297,17 +1335,30 @@ pre.code {
     return end < this.today ? end : this.today;
   };
 
+  /** Mesma análise restrita a parte da carteira (filtro por classe, instituição ou investimentos). */
+  Analytics.prototype.subset = function (pred) {
+    const s = Object.create(Analytics.prototype);
+    s.today = this.today;
+    s.assets = this.assets.filter(pred);
+    return s;
+  };
+
   Analytics.prototype.evolution = function (limit) {
     return this.months(limit).map((mk) => {
       const cut = this.cutoff(mk);
       const byClass = {};
+      const byInst = {};
+      const byAsset = {};
       let total = 0;
       this.assets.forEach((a) => {
         const v = this.valueOf(a, cut);
         total += v;
         byClass[a.classId] = (byClass[a.classId] || 0) + v;
+        const ik = a.institutionId || '_';
+        byInst[ik] = (byInst[ik] || 0) + v;
+        byAsset[a.id] = v;
       });
-      return { month: mk, total, invested: this.invested(cut), byClass };
+      return { month: mk, total, invested: this.invested(cut), byClass, byInst, byAsset };
     });
   };
 
@@ -2187,6 +2238,257 @@ pre.code {
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
+/* js/planner.js */
+/*
+ * "Onde aportar": alocação-alvo por classe, divisão do aporte do mês, projeção do prazo da meta
+ * e sugestões de investimentos. Tudo é estimativa educativa, não recomendação de investimento.
+ */
+(function (g) {
+  'use strict';
+  const P = (g.Patrimonio = g.Patrimonio || {});
+  const U = P.util;
+  const PL = (P.planner = {});
+
+  /** Alocação-alvo (% por classe) de cada perfil. */
+  PL.PROFILES = {
+    conservador: { title: 'Conservador', targets: { conta: 10, rendaFixa: 45, tesouro: 25, fiis: 7, acoes: 5, exterior: 8 } },
+    moderado: { title: 'Moderado', targets: { conta: 5, rendaFixa: 35, tesouro: 20, fiis: 10, acoes: 15, exterior: 12, cripto: 3 } },
+    arrojado: { title: 'Arrojado', targets: { conta: 5, rendaFixa: 20, tesouro: 15, fiis: 15, acoes: 25, exterior: 15, cripto: 5 } },
+  };
+
+  /** Rentabilidade anual esperada por classe, a partir do CDI (premissa simples e editável). */
+  PL.defaultReturns = function (cdi) {
+    const c = cdi > 0 ? cdi : 0.11;
+    return {
+      conta: c * 0.7,
+      rendaFixa: c,
+      tesouro: c * 1.02,
+      fundos: c,
+      previdencia: c * 0.95,
+      fiis: c + 0.01,
+      acoes: c + 0.03,
+      exterior: c + 0.02,
+      cripto: c + 0.05,
+      outros: c * 0.9,
+    };
+  };
+
+  /** CDI acumulado dos últimos 12 meses disponíveis (taxa anual), ou null. */
+  PL.cdiLast12 = function (benchmarks) {
+    const cdi = (benchmarks && benchmarks.cdi) || {};
+    const months = Object.keys(cdi).sort().slice(-12);
+    if (months.length < 6) return null;
+    const acc = months.reduce((a, m) => a * (1 + cdi[m]), 1);
+    return Math.pow(acc, 12 / months.length) - 1;
+  };
+
+  const monthly = (annual) => Math.pow(1 + annual, 1 / 12) - 1;
+
+  /** Normaliza os alvos (em %) para frações que somam 1. */
+  PL.normalizeTargets = function (targets) {
+    const out = {};
+    let sum = 0;
+    Object.keys(targets || {}).forEach((k) => {
+      const v = Number(targets[k]) || 0;
+      if (v > 0) {
+        out[k] = v;
+        sum += v;
+      }
+    });
+    if (sum <= 0) return {};
+    Object.keys(out).forEach((k) => (out[k] /= sum));
+    return out;
+  };
+
+  /**
+   * Divide `amount` entre as classes para aproximar a carteira do alvo, sem vender nada:
+   * primeiro cobre o que falta em cada classe abaixo do alvo; se sobrar, segue os pesos do alvo.
+   * values: {classe: R$}; weights: {classe: fração}.
+   */
+  PL.recommend = function (values, weights, amount) {
+    const out = {};
+    if (!(amount > 0)) return out;
+    const keys = Object.keys(weights).filter((k) => weights[k] > 0);
+    if (!keys.length) return out;
+    const total = Object.values(values).reduce((a, v) => a + (v > 0 ? v : 0), 0) + amount;
+    const deficit = {};
+    let D = 0;
+    keys.forEach((k) => {
+      deficit[k] = Math.max(0, weights[k] * total - (values[k] || 0));
+      D += deficit[k];
+    });
+    keys.forEach((k) => {
+      if (D <= 1e-9) out[k] = amount * weights[k];
+      else if (D >= amount) out[k] = (amount * deficit[k]) / D;
+      else out[k] = deficit[k] + (amount - D) * weights[k];
+    });
+    return out;
+  };
+
+  /**
+   * Meses até `goal`. A cada mês a carteira rende (taxa da classe) e recebe o aporte:
+   * com `weights`, dividido pela sugestão; sem, na proporção atual da carteira.
+   */
+  PL.simulate = function (values, amount, returns, goal, weights, max) {
+    max = max || 600;
+    const v = Object.assign({}, values);
+    const rates = {};
+    Object.keys(returns).forEach((k) => (rates[k] = monthly(returns[k])));
+    const sum = () => Object.values(v).reduce((a, x) => a + x, 0);
+    if (sum() >= goal) return 0;
+    for (let m = 1; m <= max; m++) {
+      Object.keys(v).forEach((k) => (v[k] *= 1 + (rates[k] || 0)));
+      if (amount > 0) {
+        let split;
+        if (weights) split = PL.recommend(v, weights, amount);
+        else {
+          const t = sum();
+          split = {};
+          if (t > 0) Object.keys(v).forEach((k) => (split[k] = (amount * v[k]) / t));
+          else split.rendaFixa = amount;
+        }
+        Object.keys(split).forEach((k) => (v[k] = (v[k] || 0) + split[k]));
+      }
+      if (sum() >= goal) return m;
+    }
+    return null;
+  };
+
+  /** Ideias por classe, para quem ainda não tem nada nela. Exemplos genéricos, não indicação. */
+  PL.IDEAS = {
+    conta: [{ title: 'Reserva de emergência com liquidez diária', why: 'CDB de liquidez diária, Tesouro Selic ou conta remunerada: 6 a 12 meses de gastos à mão.' }],
+    rendaFixa: [
+      { title: 'CDB, LCI e LCA acima de 100% do CDI', why: 'Bancos médios pagam mais e o FGC cobre até R$ 250 mil por CPF e instituição. LCI/LCA são isentas de IR.' },
+      { title: 'Debêntures incentivadas, CRI e CRA', why: 'Isentos de IR para pessoa física; prazos mais longos e sem FGC, por isso diversifique entre emissores.' },
+    ],
+    tesouro: [
+      { title: 'Tesouro IPCA+', why: 'Protege o poder de compra no longo prazo (inflação + juro real). Bom para a meta de patrimônio.' },
+      { title: 'Tesouro Selic', why: 'Liquidez diária e baixo risco: alternativa à poupança e à conta corrente.' },
+    ],
+    fundos: [{ title: 'Fundos multimercado', why: 'Gestão profissional que combina juros, câmbio e bolsa; compare taxa de administração e histórico.' }],
+    previdencia: [{ title: 'Previdência PGBL ou VGBL', why: 'PGBL deduz até 12% da renda tributável para quem faz a declaração completa; prefira fundos de taxa baixa.' }],
+    fiis: [{ title: 'Fundos imobiliários (FIIs)', why: 'Renda mensal isenta de IR. Um ETF de FIIs (ex.: XFIX11) ou 5 a 10 FIIs de segmentos diferentes diversificam o risco.' }],
+    acoes: [{ title: 'ETF de ações brasileiras', why: 'Um ETF do Ibovespa (ex.: BOVA11) ou de dividendos (ex.: DIVO11) dá diversificação com um único ativo.' }],
+    exterior: [{ title: 'ETF de ações globais', why: 'Dolariza parte do patrimônio. Ex.: IVVB11 (S&P 500) na B3, ou ETFs no exterior via corretora internacional.' }],
+    cripto: [{ title: 'Pequena parcela em cripto', why: 'Até 5% da carteira, de preferência via ETF de bitcoin na B3 (ex.: HASH11). Volatilidade alta.' }],
+    outros: [],
+  };
+
+  const FGC_LIMIT = 250000;
+
+  /**
+   * Análise completa. `an` é o P.Analytics da carteira inteira; `data` os dados normalizados.
+   * Retorna { amount, weights, rows, projection, suggestions, alerts, ... }.
+   */
+  PL.analyze = function (data, an) {
+    const plan = (data.settings && data.settings.plan) || {};
+    const profile = plan.profile && (PL.PROFILES[plan.profile] || plan.profile === 'custom') ? plan.profile : 'moderado';
+    const rawTargets = profile === 'custom' ? plan.targets || {} : PL.PROFILES[profile].targets;
+    const weights = PL.normalizeTargets(rawTargets);
+    const cdi = PL.cdiLast12(data.benchmarks);
+    const returns = Object.assign(PL.defaultReturns(cdi), plan.returns || {});
+
+    const active = an.assets.filter((a) => !a.archived);
+    const values = {};
+    active.forEach((a) => (values[a.classId] = (values[a.classId] || 0) + an.valueOf(a, an.today)));
+    Object.keys(values).forEach((k) => values[k] <= 0 && delete values[k]);
+    const total = Object.values(values).reduce((a, v) => a + v, 0);
+
+    const p12 = an.performance(12);
+    const avgNet = p12.length ? p12.reduce((a, p) => a + p.netContribution, 0) / p12.length : 0;
+    const suggestedAmount = avgNet > 0 ? Math.round(avgNet / 50) * 50 : 0;
+    const amount = plan.monthly > 0 ? plan.monthly : suggestedAmount;
+    const split = PL.recommend(values, weights, amount);
+
+    const classIds = P.ASSET_CLASSES.map((c) => c.id).filter((id) => values[id] > 0 || weights[id] > 0);
+    const rows = classIds.map((id) => ({
+      classId: id,
+      value: values[id] || 0,
+      share: total > 0 ? (values[id] || 0) / total : 0,
+      target: weights[id] || 0,
+      aporte: split[id] || 0,
+      holdings: active.filter((a) => a.classId === id).sort((x, y) => an.valueOf(y, an.today) - an.valueOf(x, an.today)),
+    }));
+
+    const expected = (w) => Object.keys(w).reduce((acc, k) => acc + w[k] * (returns[k] || 0), 0);
+    const currentWeights = {};
+    Object.keys(values).forEach((k) => (currentWeights[k] = total > 0 ? values[k] / total : 0));
+
+    // Projeção da meta.
+    const goal = (data.settings && data.settings.goal) || 0;
+    let projection = null;
+    if (goal > 0 && total < goal) {
+      const keep = PL.simulate(values, amount, returns, goal, null);
+      const follow = PL.simulate(values, amount, returns, goal, weights);
+      const more = amount > 0 ? PL.simulate(values, amount * 1.25, returns, goal, weights) : null;
+      // Dinheiro parado em conta acima da reserva-alvo, aplicado em renda fixa.
+      const reserve = (weights.conta || 0) * total;
+      const idle = Math.max(0, (values.conta || 0) - Math.max(reserve, 0));
+      let idleMonths = null;
+      if (idle >= 1000) {
+        const moved = Object.assign({}, values);
+        moved.conta -= idle;
+        moved.rendaFixa = (moved.rendaFixa || 0) + idle;
+        idleMonths = PL.simulate(moved, amount, returns, goal, weights);
+      }
+      projection = { goal, keep, follow, more, moreAmount: amount * 1.25, idle, idleMonths };
+    }
+
+    // Sugestões: para cada classe que recebe aporte, reforçar o que já tem ou começar algo novo.
+    const suggestions = rows
+      .filter((r) => r.aporte >= Math.max(1, amount * 0.02) || (r.target > 0 && !r.holdings.length))
+      .sort((a, b) => b.aporte - a.aporte)
+      .map((r) => ({
+        classId: r.classId,
+        aporte: r.aporte,
+        existing: r.holdings.slice(0, 3).map((a) => ({ id: a.id, name: a.name, institution: a.institutionName })),
+        ideas: r.holdings.length ? [] : PL.IDEAS[r.classId] || [],
+      }));
+    const missing = P.ASSET_CLASSES.filter((c) => !(values[c.id] > 0) && PL.IDEAS[c.id] && PL.IDEAS[c.id].length && !(weights[c.id] > 0)).map((c) => c.id);
+
+    // Alertas.
+    const alerts = [];
+    const byInst = {};
+    active.forEach((a) => {
+      const t = U.norm(a.name);
+      const covered = a.classId === 'conta' || (a.classId === 'rendaFixa' && !/debenture|cri\b|cra\b|fundo/.test(t));
+      if (!covered) return;
+      const k = a.institutionId || '_';
+      byInst[k] = byInst[k] || { name: a.institutionName, value: 0 };
+      byInst[k].value += an.valueOf(a, an.today);
+    });
+    Object.values(byInst).forEach((i) => {
+      if (i.value > FGC_LIMIT)
+        alerts.push({ kind: 'fgc', text: i.name + ' concentra ' + U.money(i.value) + ' em aplicações cobertas pelo FGC, acima do limite de R$ 250 mil por CPF e instituição. Se estiver tudo no mesmo CPF, divida entre instituições ou titulares.' });
+    });
+    active.forEach((a) => {
+      const v = an.valueOf(a, an.today);
+      if (total > 0 && v / total > 0.3) alerts.push({ kind: 'concentration', text: a.name + ' representa ' + U.pct(v / total) + ' da carteira. Concentração alta em um único investimento.' });
+    });
+    if (total > 0 && (values.conta || 0) / total > (weights.conta || 0) + 0.05 && (values.conta || 0) > 1000) {
+      alerts.push({ kind: 'idle', text: U.money(values.conta) + ' (' + U.pct(values.conta / total) + ') estão em conta e poupança, acima da reserva do perfil (' + U.pct(weights.conta || 0) + '). Esse dinheiro rende menos que a renda fixa.' });
+    }
+
+    return {
+      profile,
+      profileTitle: profile === 'custom' ? 'Personalizado' : PL.PROFILES[profile].title,
+      weights,
+      returns,
+      cdi,
+      total,
+      amount,
+      suggestedAmount,
+      rows,
+      expectedNow: expected(currentWeights),
+      expectedTarget: expected(weights),
+      projection,
+      suggestions,
+      missing,
+      alerts,
+    };
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
 /* js/statement.js */
 /* Importação de extrato bancário (CSV) para o Orçamento.
  * Testado com o extrato de conta corrente do Banco do Brasil:
@@ -2949,8 +3251,10 @@ pre.code {
     });
   };
 
-  C.stacked = function (canvas, points, classes, hidden) {
+  /** Áreas empilhadas. groups: [{id, title, color}]; key: 'byClass' | 'byInst' | 'byAsset'. */
+  C.stacked = function (canvas, points, classes, hidden, key) {
     const t = C.theme();
+    key = key || 'byClass';
     const opts = base(hidden, t, U.money);
     opts.scales.y.stacked = true;
     opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
@@ -2960,7 +3264,7 @@ pre.code {
         labels: points.map((p) => U.fmtMonth(p.month)),
         datasets: classes.map((c) => ({
           label: c.title,
-          data: points.map((p) => p.byClass[c.id] || 0),
+          data: points.map((p) => (c.ids ? c.ids.reduce((acc, id) => acc + (p[key][id] || 0), 0) : p[key][c.id] || 0)),
           borderColor: c.color,
           backgroundColor: c.color + 'CC',
           fill: true,
@@ -3066,6 +3370,80 @@ pre.code {
     });
   };
 
+  /**
+   * Várias linhas lado a lado (investimentos "separados").
+   * series: [{label, color, data: [valor|null por rótulo]}]; percent: valores em fração (0,05 = 5%).
+   */
+  C.lines = function (canvas, labels, series, hidden, percent) {
+    const t = C.theme();
+    const fmt = percent ? pctTick : U.money;
+    const opts = base(percent ? false : hidden, t, fmt);
+    opts.scales.y.beginAtZero = false;
+    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    return make(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: series.map((s) => ({
+          label: s.label,
+          data: s.data.map((v) => (v === null || v === undefined ? null : percent ? v * 100 : v)),
+          borderColor: s.color,
+          backgroundColor: s.color,
+          borderWidth: s.width || 2,
+          borderDash: s.dash,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          spanGaps: true,
+        })),
+      },
+      options: opts,
+    });
+  };
+
+  /**
+   * Barras horizontais. rows: [{key, label, color, values: [..por dataset]}];
+   * opts: { datasets: [{label, color?}], percent, selected, onClick(row) }.
+   */
+  C.hbars = function (canvas, rows, hidden, opts) {
+    const t = C.theme();
+    opts = opts || {};
+    const fmt = opts.percent ? (v) => pctTick(v) : U.money;
+    const datasets = (opts.datasets || [{ label: 'Valor' }]).map((d, i) => ({
+      label: d.label,
+      data: rows.map((r) => (opts.percent ? r.values[i] * 100 : r.values[i])),
+      backgroundColor: rows.map((r) => {
+        const c = d.color || (typeof r.color === 'function' ? r.color(r.values[i]) : r.color);
+        return opts.selected && r.key !== opts.selected ? dim(c) : c;
+      }),
+      borderRadius: 4,
+      barPercentage: 0.8,
+      categoryPercentage: 0.8,
+    }));
+    const hideValues = hidden && !opts.percent;
+    return make(canvas, {
+      type: 'bar',
+      data: { labels: rows.map((r) => r.label), datasets },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 250 },
+        interaction: { mode: 'nearest', axis: 'y', intersect: false },
+        onClick: opts.onClick ? (evt, els) => els.length && opts.onClick(rows[els[0].index]) : undefined,
+        onHover: opts.onClick ? pointer : undefined,
+        plugins: {
+          legend: { display: datasets.length > 1, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } },
+          tooltip: { callbacks: { label: (ctx) => ' ' + ctx.dataset.label + ': ' + (hideValues ? U.MASK : fmt(ctx.parsed.x)) } },
+        },
+        scales: {
+          x: { grid: { color: t.grid }, border: { display: false }, ticks: { color: t.text, callback: (v) => (opts.percent ? pctTick(v) : hideValues ? '' : U.compact(v)) } },
+          y: { grid: { display: false }, ticks: { color: t.text, autoSkip: false } },
+        },
+      },
+    });
+  };
+
   C.assetHistory = function (canvas, snaps, color, hidden) {
     const t = C.theme();
     const opts = base(hidden, t, U.money);
@@ -3159,6 +3537,13 @@ pre.code {
     evoMode: 'total',
     allocMode: 'class',
     perfPeriod: 12,
+    cmpMode: 'class',
+    pfClass: null,
+    pfInst: null,
+    pfAssets: [],
+    portView: 'sum',
+    portMetric: 'value',
+    portPeriod: 12,
     group: 'institution',
     showArchived: false,
     search: '',
@@ -3220,6 +3605,10 @@ pre.code {
     $$('.nav-item').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
     $('#toggle-hide').addEventListener('click', () => store.setSetting('hideValues', !hidden()));
     document.addEventListener('click', onGlobalClick);
+    document.addEventListener('change', (e) => {
+      const el = e.target.closest && e.target.closest('[data-pf]');
+      if (el) setPf({ [el.dataset.pf]: el.value || null });
+    });
     // No Windows o próprio app grava antes de fechar; no navegador, avisa se há gravação pendente.
     if (backend.id !== 'desktop') {
       g.addEventListener('beforeunload', (e) => {
@@ -3297,6 +3686,20 @@ pre.code {
   const ACTIONS = {
     go: (view) => go(view),
     'open-asset': (id) => go('asset', id),
+    'pf-toggle': (id) => {
+      const i = id.indexOf(':');
+      togglePf(id.slice(0, i), id.slice(i + 1));
+    },
+    'pf-clear': () => setPf({ pfClass: null, pfInst: null, pfAssets: [] }),
+    'pf-clear-picks': () => setPf({ pfAssets: [] }),
+    'pf-pick': (id) => setPf({ pfAssets: state.pfAssets.includes(id) ? state.pfAssets.filter((x) => x !== id) : state.pfAssets.concat(id) }),
+    'pf-pick-group': (ids) => {
+      const list = ids.split(',');
+      const all = list.every((id) => state.pfAssets.includes(id));
+      setPf({ pfAssets: all ? state.pfAssets.filter((id) => !list.includes(id)) : Array.from(new Set(state.pfAssets.concat(list))) });
+    },
+    'pf-show-dashboard': () => go('dashboard'),
+    'edit-plan': () => openPlanForm(),
     'new-asset': () => openAssetForm(null),
     'edit-asset': (id) => openAssetForm(store.asset(id)),
     'quick-update': (id) => openQuickUpdate(store.asset(id)),
@@ -3390,6 +3793,88 @@ pre.code {
   };
 
   // =====================================================================
+  // Filtro da carteira (compartilhado entre Início e Carteira)
+  // =====================================================================
+
+  /** O investimento entra no filtro atual? `withPicks`: considera também os investimentos selecionados. */
+  function pfMatch(a, withPicks) {
+    return (
+      (!state.pfClass || a.classId === state.pfClass) &&
+      (!state.pfInst || (a.institutionId || '_') === state.pfInst) &&
+      (!withPicks || !state.pfAssets.length || state.pfAssets.includes(a.id))
+    );
+  }
+  const pfActive = (withPicks) => !!(state.pfClass || state.pfInst || (withPicks && state.pfAssets.length));
+
+  function setPf(patch) {
+    Object.assign(state, patch);
+    render();
+  }
+
+  /** Clique num gráfico ou lista: liga o filtro, ou desliga se já estava ligado. */
+  function togglePf(mode, key) {
+    if (mode === 'class') return setPf({ pfClass: state.pfClass === key ? null : key });
+    if (mode === 'inst') return setPf({ pfInst: state.pfInst === key ? null : key });
+    if (mode === 'asset' && key && key !== '_other') {
+      const only = state.pfAssets.length === 1 && state.pfAssets[0] === key;
+      return setPf({ pfAssets: only ? [] : [key] });
+    }
+  }
+
+  /** Grupos (classe, instituição ou investimento) de um conjunto de ativos do Analytics. */
+  function groupsOf(an, mode, iso) {
+    const map = {};
+    an.assets.forEach((a) => {
+      let key, label, color;
+      if (mode === 'class') {
+        const c = P.classById(a.classId);
+        [key, label, color] = [c.id, c.title, c.color];
+      } else if (mode === 'inst') {
+        [key, label, color] = [a.institutionId || '_', a.institutionName, a.institutionColor];
+      } else {
+        [key, label, color] = [a.id, a.name, null];
+      }
+      map[key] = map[key] || { key, label, color, ids: [], value: 0, sub: mode === 'asset' ? a.institutionName : '' };
+      map[key].ids.push(a.id);
+      map[key].value += an.valueOf(a, iso || an.today);
+    });
+    const list = Object.values(map).sort((x, y) => y.value - x.value);
+    list.forEach((g, i) => (g.color = g.color || P.PALETTE[i % P.PALETTE.length]));
+    return list;
+  }
+
+  /** Limita a `max` grupos; o resto vira "Outros". */
+  function capGroups(list, max) {
+    if (list.length <= max) return list;
+    const head = list.slice(0, max - 1);
+    const rest = list.slice(max - 1);
+    head.push({ key: '_other', label: 'Outros (' + rest.length + ')', color: '#8E8E93', ids: rest.flatMap((g) => g.ids), value: rest.reduce((a, g) => a + g.value, 0) });
+    return head;
+  }
+
+  function pfBar(withPicks) {
+    const d = store.data;
+    const active = d.assets.filter((a) => !a.archived || state.showArchived);
+    const classes = P.ASSET_CLASSES.filter((c) => active.some((a) => a.classId === c.id) || c.id === state.pfClass);
+    const insts = d.institutions.filter((i) => active.some((a) => a.institutionId === i.id) || i.id === state.pfInst).sort((a, b) => a.name.localeCompare(b.name));
+    const select = (key, label, options, cur) =>
+      '<select class="pf-select' + (cur ? ' on' : '') + '" data-pf="' + key + '" aria-label="' + esc(label) + '"><option value="">' + esc(label) + ': todas</option>' +
+      options.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>').join('') +
+      '</select>';
+    const picks = withPicks && state.pfAssets.length;
+    return (
+      '<div class="filter-bar pf-bar">' +
+      select('pfClass', 'Classe', classes.map((c) => [c.id, c.title]), state.pfClass) +
+      select('pfInst', 'Instituição', insts.map((i) => [i.id, i.name]), state.pfInst) +
+      (picks
+        ? '<button class="chip active-filter" data-action="pf-clear-picks">' + state.pfAssets.length + (state.pfAssets.length === 1 ? ' investimento selecionado' : ' investimentos selecionados') + ' <span aria-hidden="true">×</span></button>'
+        : '') +
+      (pfActive(withPicks) ? '<button class="btn small ghost" data-action="pf-clear">Limpar filtros</button>' : '<span class="faint">Clique nos gráficos e nas listas para filtrar.</span>') +
+      '</div>'
+    );
+  }
+
+  // =====================================================================
   // Início (dashboard)
   // =====================================================================
 
@@ -3409,8 +3894,19 @@ pre.code {
       return;
     }
 
-    const an = new P.Analytics(data);
-    const today = an.today;
+    const full = new P.Analytics(data);
+    const filtered = pfActive(true);
+    const an = filtered ? full.subset((a) => pfMatch(a, true)) : full;
+    const today = full.today;
+    const fullTotal = full.total();
+    const goal = data.settings.goal || 0;
+    let html = pfBar(true) + '<div class="grid">';
+
+    if (!an.assets.length) {
+      view.innerHTML = html + '<div class="card span-12 empty"><p>Nenhum investimento com esses filtros.</p><button class="btn" data-action="pf-clear">Limpar filtros</button></div></div>';
+      return;
+    }
+
     const total = an.total();
     const invested = an.invested();
     const totalGain = total - invested + an.proventos();
@@ -3418,40 +3914,38 @@ pre.code {
     const year = today.slice(0, 4);
     const ytd = an.performance().filter((p) => p.month.startsWith(year));
     const ytdRate = ytd.reduce((acc, p) => (p.rate === null ? acc : acc * (1 + p.rate)), 1) - 1;
-    const goal = data.settings.goal || 0;
-
-    let html = '<div class="grid">';
+    const activeAssets = an.assets.filter((a) => !a.archived);
 
     // ---- Resumo
     html +=
       '<section class="card ' + (goal > 0 ? 'span-8' : 'span-12') + '">' +
-      '<div class="kpi-label">Patrimônio total</div>' +
-      '<div class="kpi-value num">' + money(total) + '</div>' +
+      '<div class="kpi-label">' + (filtered ? 'Patrimônio filtrado' : 'Patrimônio total') + '</div>' +
+      '<div class="kpi-value num">' + money(total) + (filtered && fullTotal > 0 ? ' <span class="muted" style="font-size:15px;font-weight:500">' + U.pct(total / fullTotal) + ' do total</span>' : '') + '</div>' +
       '<div class="' + cls(month.gain) + ' num">' + signed(month.gain) + (month.rate !== null ? ' (' + U.pct(month.rate, true) + ')' : '') + ' <span class="muted">no mês</span></div>' +
       '<div class="kpi-row">' +
       kpi('Valor investido', money(invested)) +
       kpi('Ganho total', '<span class="' + cls(totalGain) + '">' + signed(totalGain) + '</span>') +
       kpi('Rentabilidade no ano', '<span class="' + cls(ytdRate) + '">' + U.pct(ytdRate, true) + '</span>') +
-      kpi('Investimentos', String(data.assets.filter((a) => !a.archived).length)) +
-      kpi('Instituições', String(new Set(data.assets.filter((a) => !a.archived).map((a) => a.institutionId)).size)) +
+      kpi('Investimentos', String(activeAssets.length)) +
+      kpi('Instituições', String(new Set(activeAssets.map((a) => a.institutionId)).size)) +
       '</div></section>';
 
-    // ---- Meta
+    // ---- Meta (sempre a carteira inteira)
+    const advice = P.planner.analyze(data, full);
     if (goal > 0) {
-      const last12 = an.performance(12);
-      const avgContribution = last12.length ? last12.reduce((a, p) => a + p.netContribution, 0) / last12.length : 0;
-      const rates = last12.map((p) => p.rate).filter((r) => r !== null);
-      const avgRate = rates.length ? Math.max(rates.reduce((a, b) => a + b, 0) / rates.length, 0) : 0;
-      const months = P.Analytics.monthsToReach(goal, total, Math.max(avgContribution, 0), avgRate);
-      const progress = Math.max(0, Math.min(1, total / goal));
+      const progress = Math.max(0, Math.min(1, fullTotal / goal));
+      const pr = advice.projection;
       html +=
         '<section class="card span-4">' +
         '<div class="card-head"><div><h3 class="card-title">Meta de patrimônio</h3><div class="card-sub">' + money(goal) + '</div></div><strong style="color:var(--accent)">' + U.pct(progress) + '</strong></div>' +
         '<div class="progress"><span style="width:' + (progress * 100).toFixed(1) + '%"></span></div>' +
         (progress >= 1
           ? '<p class="pos">Meta atingida! 🎉</p>'
-          : '<p>Faltam <strong class="num">' + money(goal - total) + '</strong>' + (months !== null ? '<br><span class="muted">Estimativa: ' + describeMonths(months) + '</span>' : '') + '</p>' +
-            '<div class="faint">Com base na média de aportes e rentabilidade dos últimos 12 meses.</div>') +
+          : '<p>Faltam <strong class="num">' + money(goal - fullTotal) + '</strong>' +
+            (pr && pr.keep !== null ? '<br><span class="muted">No ritmo atual: ' + describeMonths(pr.keep) + '</span>' : '') +
+            (pr && pr.follow !== null && pr.keep !== null && pr.follow < pr.keep ? '<br><span class="pos">Seguindo "Onde aportar": ' + describeMonths(pr.follow) + '</span>' : '') +
+            '</p>' +
+            '<div class="faint">Aporte de ' + money(advice.amount) + '/mês e rentabilidade esperada de cada classe. Veja "Onde aportar".</div>') +
         '</section>';
     }
 
@@ -3459,27 +3953,46 @@ pre.code {
     const points = an.evolution(state.evoPeriod);
     const first = points[0];
     const last = points[points.length - 1];
-    const classes = P.ASSET_CLASSES.filter((c) => points.some((p) => (p.byClass[c.id] || 0) > 0));
+    let stackGroups = null;
+    let stackKey = 'byClass';
+    if (state.evoMode === 'class') stackGroups = P.ASSET_CLASSES.filter((c) => points.some((p) => (p.byClass[c.id] || 0) > 0)).map((c) => ({ id: c.id, title: c.title, color: c.color }));
+    else if (state.evoMode !== 'total') {
+      stackKey = state.evoMode === 'inst' ? 'byInst' : 'byAsset';
+      stackGroups = capGroups(groupsOf(an, state.evoMode, last ? U.monthEnd(last.month) : today).filter((g) => points.some((p) => g.ids.some((id) => (p.byAsset[id] || 0) > 0))), 8).map((g) => ({
+        title: g.label,
+        color: g.color,
+        ids: state.evoMode === 'inst' && g.key !== '_other' ? [g.key] : state.evoMode === 'inst' ? [...new Set(g.ids.map((id) => an.assets.find((a) => a.id === id).institutionId || '_'))] : g.ids,
+      }));
+    }
     html +=
       '<section class="card span-12">' +
       '<div class="card-head"><div><h3 class="card-title">Evolução patrimonial</h3>' +
       (points.length > 1 && !hidden() ? '<div class="card-sub">' + signed(last.total - first.total) + ' desde ' + U.fmtMonth(first.month) + '</div>' : '') +
       '</div><div style="display:flex;gap:8px;flex-wrap:wrap">' +
-      seg('evoMode', [['total', 'Total'], ['class', 'Por classe']], state.evoMode) +
+      seg('evoMode', [['total', 'Total'], ['class', 'Classe'], ['inst', 'Instituição'], ['asset', 'Investimento']], state.evoMode) +
       seg('evoPeriod', PERIODS, state.evoPeriod) +
       '</div></div>' +
       '<div class="chart-box"><canvas id="ch-evo"></canvas></div>' +
       (state.evoMode === 'total' ? '<div class="legend"><span><i class="dot" style="background:var(--accent)"></i>Patrimônio</span><span><i class="dot" style="background:var(--text-3)"></i>Valor investido (aportes − resgates)</span></div>' : '') +
       '</section>';
 
-    // ---- Alocação
-    const slices = state.allocMode === 'class' ? an.allocationByClass() : an.allocationByInstitution();
+    // ---- Distribuição
+    const allocGroups = capGroups(groupsOf(an.subset((a) => an.valueOf(a, today) > 0.004), state.allocMode), state.allocMode === 'asset' ? 10 : 12);
+    const allocTotal = allocGroups.reduce((a, g) => a + g.value, 0);
+    const slices = allocGroups.map((g) => ({ key: g.key, label: g.label, color: g.color, value: g.value, share: allocTotal ? g.value / allocTotal : 0 }));
+    const selectedKey = state.allocMode === 'class' ? state.pfClass : state.allocMode === 'inst' ? state.pfInst : state.pfAssets.length === 1 ? state.pfAssets[0] : null;
     html +=
       '<section class="card span-5">' +
-      '<div class="card-head"><h3 class="card-title">Distribuição da carteira</h3>' + seg('allocMode', [['class', 'Classe'], ['inst', 'Instituição']], state.allocMode) + '</div>' +
+      '<div class="card-head"><h3 class="card-title">Distribuição da carteira</h3>' + seg('allocMode', [['class', 'Classe'], ['inst', 'Instituição'], ['asset', 'Investimento']], state.allocMode) + '</div>' +
       '<div class="chart-box donut"><canvas id="ch-alloc"></canvas></div>' +
       '<div class="list" style="margin-top:10px">' +
-      slices.map((s) => '<div class="row"><i class="dot" style="background:' + s.color + '"></i><div class="grow title">' + esc(s.label) + '</div><div class="muted num">' + money(s.value) + '</div><div class="num" style="width:64px;text-align:right;font-weight:600">' + U.pct(s.share) + '</div></div>').join('') +
+      slices
+        .map(
+          (s) =>
+            '<div class="row' + (s.key !== '_other' ? ' clickable' : '') + (selectedKey === s.key ? ' selected' : selectedKey ? ' dimmed' : '') + '"' + (s.key !== '_other' ? ' data-action="pf-toggle" data-id="' + esc(state.allocMode + ':' + s.key) + '"' : '') + '>' +
+            '<i class="dot" style="background:' + s.color + '"></i><div class="grow title">' + esc(s.label) + '</div><div class="muted num">' + money(s.value) + '</div><div class="num" style="width:64px;text-align:right;font-weight:600">' + U.pct(s.share) + '</div></div>'
+        )
+        .join('') +
       '</div></section>';
 
     // ---- Rentabilidade
@@ -3496,7 +4009,7 @@ pre.code {
       '<section class="card span-7">' +
       '<div class="card-head"><div><h3 class="card-title">Rentabilidade</h3><div class="card-sub">Mensal e acumulada no período</div></div>' + seg('perfPeriod', PERIODS, state.perfPeriod) + '</div>' +
       '<div class="kpi-row" style="margin-top:0;padding-top:0;border:0;margin-bottom:10px">' +
-      kpi('Carteira', '<span class="' + cls(accP) + '">' + U.pct(accP, true) + '</span>') +
+      kpi(filtered ? 'Seleção' : 'Carteira', '<span class="' + cls(accP) + '">' + U.pct(accP, true) + '</span>') +
       (accCDI !== null ? kpi('CDI', '<span style="color:var(--orange)">' + U.pct(accCDI, true) + '</span>') : '') +
       (accCDI !== null && accCDI > 0.0001 ? kpi('% do CDI', U.pct(accP / accCDI)) : '') +
       (ipcaCum.length ? kpi('IPCA', U.pct(ipcaCum[ipcaCum.length - 1].value, true)) : '') +
@@ -3506,12 +4019,48 @@ pre.code {
       (state.benchError && !Object.keys(bench.cdi || {}).length ? '<div class="faint">' + esc(state.benchError) + '</div>' : '') +
       '</section>';
 
+    // ---- Comparativo (rentabilidade de cada grupo no período)
+    const periodLabel = (PERIODS.find((p) => p[0] === state.perfPeriod) || [0, 'Tudo'])[1];
+    const prevEnd = U.monthEnd(U.addMonths(U.monthKey(today), -1));
+    const cmp = capGroups(groupsOf(an.subset((a) => !a.archived || an.valueOf(a, today) > 0), state.cmpMode), state.cmpMode === 'asset' ? 15 : 12)
+      .filter((grp) => grp.key !== '_other')
+      .map((grp) => {
+        const ids = new Set(grp.ids);
+        const sub = an.subset((a) => ids.has(a.id));
+        const cum = P.Analytics.cumulative(sub.performance(state.perfPeriod).filter((p) => p.rate !== null));
+        const prev = sub.total(prevEnd);
+        return Object.assign(grp, { rate: cum.length ? cum[cum.length - 1].value : null, diff: grp.value - prev, prev });
+      });
+    const cmpSelected = state.cmpMode === 'class' ? state.pfClass : state.cmpMode === 'inst' ? state.pfInst : state.pfAssets.length === 1 ? state.pfAssets[0] : null;
+    const withRate = cmp.filter((g) => g.rate !== null);
+    const maxAbs = Math.max(0.0001, ...withRate.map((g) => Math.abs(g.rate)));
+    html +=
+      '<section class="card span-7">' +
+      '<div class="card-head"><div><h3 class="card-title">Comparativo</h3><div class="card-sub">Rentabilidade em ' + esc(periodLabel) + ' e saldo de cada ' + (state.cmpMode === 'class' ? 'classe' : state.cmpMode === 'inst' ? 'instituição' : 'investimento') + '</div></div>' +
+      seg('cmpMode', [['class', 'Classe'], ['inst', 'Instituição'], ['asset', 'Investimento']], state.cmpMode) + '</div>' +
+      (withRate.length ? '<div class="chart-box" style="height:' + Math.min(420, 40 + withRate.length * 26) + 'px"><canvas id="ch-cmp"></canvas></div>' : '') +
+      '<div class="list" style="margin-top:8px">' +
+      cmp
+        .map(
+          (g) =>
+            '<div class="row clickable' + (cmpSelected === g.key ? ' selected' : cmpSelected ? ' dimmed' : '') + '" data-action="pf-toggle" data-id="' + esc(state.cmpMode + ':' + g.key) + '">' +
+            (state.cmpMode === 'inst' ? badge(g.label, g.color, true) : '<i class="dot" style="background:' + g.color + '"></i>') +
+            '<div class="grow"><div class="title">' + esc(g.label) + '</div><div class="sub">' + (total > 0 ? U.pct(g.value / total) + ' da ' + (filtered ? 'seleção' : 'carteira') : '') + (g.sub ? ' · ' + esc(g.sub) : '') + '</div>' +
+            (g.rate !== null ? '<div class="ret-bar"><span style="width:' + ((Math.abs(g.rate) / maxAbs) * 100).toFixed(1) + '%;background:' + (g.rate >= 0 ? 'var(--green)' : 'var(--red)') + '"></span></div>' : '') +
+            '</div>' +
+            '<div class="right"><div class="num" style="font-weight:600">' + money(g.value) + '</div>' +
+            '<div class="num ' + (g.rate === null ? 'muted' : cls(g.rate)) + '" style="font-size:12.5px">' + (g.rate === null ? '—' : U.pct(g.rate, true)) + (g.prev > 0 && Math.abs(g.diff) >= 0.01 ? ' · ' + '<span class="' + cls(g.diff) + '">' + signed(g.diff) + ' no mês</span>' : '') + '</div>' +
+            '</div></div>'
+        )
+        .join('') +
+      '</div></section>';
+
     // ---- Aportes
     const p12 = an.performance(12);
     const sum = (k) => p12.reduce((a, p) => a + p[k], 0);
     const avg = p12.length ? (sum('aportes') - sum('resgates')) / p12.length : 0;
     html +=
-      '<section class="card span-6">' +
+      '<section class="card span-5">' +
       '<div class="card-head"><div><h3 class="card-title">Aportes e proventos</h3><div class="card-sub">Últimos 12 meses · média líquida ' + money(avg) + '/mês</div></div></div>' +
       '<div class="kpi-row" style="margin-top:0;padding-top:0;border:0;margin-bottom:10px">' +
       kpi('Aportado', '<span class="pos">' + money(sum('aportes')) + '</span>') +
@@ -3521,39 +4070,194 @@ pre.code {
       '<div class="chart-box sm" style="height:210px"><canvas id="ch-flows"></canvas></div>' +
       '</section>';
 
-    // ---- Por instituição
-    const byInst = an.allocationByInstitution();
-    const prevEnd = U.monthEnd(U.addMonths(U.monthKey(today), -1));
-    html +=
-      '<section class="card span-6">' +
-      '<div class="card-head"><div><h3 class="card-title">Por instituição</h3><div class="card-sub">Variação desde o fim do mês passado</div></div></div><div class="list">' +
-      byInst
-        .map((s) => {
-          const prev = an.assets.filter((a) => (a.institutionId || '_') === s.key).reduce((acc, a) => acc + an.valueOf(a, prevEnd), 0);
-          const diff = s.value - prev;
-          return (
-            '<div class="row">' + badge(s.label, s.color, true) +
-            '<div class="grow"><div class="title">' + esc(s.label) + '</div><div class="sub">' + U.pct(s.share) + ' da carteira</div></div>' +
-            '<div class="right"><div class="num" style="font-weight:600">' + money(s.value) + '</div>' +
-            (prev > 0 ? '<div class="num ' + cls(diff) + '" style="font-size:12.5px">' + signed(diff) + '</div>' : '') +
-            '</div></div>'
-          );
-        })
-        .join('') +
-      '</div></section>';
+    // ---- Onde aportar
+    html += advisorCard(advice, filtered);
 
     html += '</div>';
     view.innerHTML = html;
 
     if (state.evoMode === 'total') C.evolution($('#ch-evo'), points, hidden());
-    else C.stacked($('#ch-evo'), points, classes, hidden());
-    C.donut($('#ch-alloc'), slices, hidden());
+    else C.stacked($('#ch-evo'), points, stackGroups, hidden(), stackKey);
+    C.donut($('#ch-alloc'), slices, hidden(), { selected: selectedKey, onClick: (s) => togglePf(state.allocMode, s.key) });
     C.returnBars($('#ch-returns'), perf);
     const series = [{ name: 'Carteira', points: portfolioCum }];
     if (cdiCum.length) series.push({ name: 'CDI', points: cdiCum });
     if (ipcaCum.length) series.push({ name: 'IPCA', points: ipcaCum });
     C.cumulative($('#ch-cum'), series);
+    if (withRate.length) {
+      C.hbars(
+        $('#ch-cmp'),
+        withRate.map((g) => ({ key: g.key, label: g.label.length > 26 ? g.label.slice(0, 25) + '…' : g.label, values: [g.rate], color: g.rate >= 0 ? C.theme().green : C.theme().red })),
+        hidden(),
+        { percent: true, datasets: [{ label: 'Rentabilidade' }], selected: cmpSelected, onClick: (r) => togglePf(state.cmpMode, r.key) }
+      );
+    }
     C.flows($('#ch-flows'), p12, hidden());
+    const adv = $('#ch-target');
+    if (adv) {
+      const rows = advice.rows.filter((r) => r.share > 0.0005 || r.target > 0);
+      C.hbars(
+        adv,
+        rows.map((r) => ({ key: r.classId, label: P.classById(r.classId).title, values: [r.share, r.target], color: P.classById(r.classId).color })),
+        hidden(),
+        { percent: true, datasets: [{ label: 'Hoje' }, { label: 'Alvo', color: C.theme().muted }], selected: state.pfClass, onClick: (r) => togglePf('class', r.key) }
+      );
+    }
+  }
+
+  /** Card "Onde aportar": divisão do aporte, prazo da meta, sugestões e alertas. */
+  function advisorCard(a, filtered) {
+    const goal = store.data.settings.goal || 0;
+    const pr = a.projection;
+    const cmpMonths = (m, base) => (m === null ? 'mais de 50 anos' : describeMonths(m) + (base !== null && base !== undefined && m < base ? ' <span class="pos">(' + describeMonths(base - m) + ' antes)</span>' : ''));
+    let html =
+      '<section class="card span-12 advisor" id="advisor">' +
+      '<div class="card-head"><div><h3 class="card-title">Onde aportar</h3><div class="card-sub">' +
+      (a.amount > 0 ? 'Próximo aporte de <strong>' + money(a.amount) + '</strong>' + (store.data.settings.plan && store.data.settings.plan.monthly > 0 ? '' : ' (sua média dos últimos 12 meses)') : 'Informe quanto pretende aportar por mês') +
+      ' · perfil ' + esc(a.profileTitle) + (filtered ? ' · considera a carteira inteira' : '') + '</div></div>' +
+      '<button class="btn small" data-action="edit-plan">Ajustar perfil e aporte</button></div>';
+
+    html +=
+      '<div class="advisor-grid"><div><h4>Carteira hoje × alvo</h4><div class="chart-box" style="height:' + Math.max(180, 50 + a.rows.length * 34) + 'px"><canvas id="ch-target"></canvas></div>' +
+      '<div class="kpi-row">' +
+      kpi('Rentabilidade esperada hoje', U.pct(a.expectedNow) + ' a.a.') +
+      kpi('Com a carteira no alvo', '<span class="' + (a.expectedTarget >= a.expectedNow ? 'pos' : '') + '">' + U.pct(a.expectedTarget) + ' a.a.</span>') +
+      '</div></div>';
+
+    html += '<div><h4>Como dividir o aporte</h4>';
+    if (!(a.amount > 0)) {
+      html += '<p class="muted">Sem aportes nos últimos 12 meses. Informe um valor mensal para ver a sugestão.</p><button class="btn primary" data-action="edit-plan">Informar aporte mensal</button>';
+    } else {
+      html += a.suggestions
+        .map((s) => {
+          const c = P.classById(s.classId);
+          const row = a.rows.find((r) => r.classId === s.classId);
+          let idea = '';
+          if (s.existing.length) idea = '<div class="idea">Reforce: ' + s.existing.map((e) => '<a href="#" class="linklike" data-action="open-asset" data-id="' + e.id + '"><strong>' + esc(e.name) + '</strong></a> <span class="faint">' + esc(e.institution) + '</span>').join(', ') + '</div>';
+          if (s.ideas.length) idea += s.ideas.map((i) => '<div class="idea"><span class="tag new">novo</span> <strong>' + esc(i.title) + '</strong> — ' + esc(i.why) + '</div>').join('');
+          return (
+            '<div class="split-row"><div class="top"><i class="dot" style="background:' + c.color + '"></i><div class="grow">' + esc(c.title) +
+            ' <span class="faint">hoje ' + U.pct(row.share) + ' · alvo ' + U.pct(row.target) + '</span></div><div class="amount num">' + money(s.aporte) + '</div></div>' +
+            '<div class="ret-bar"><span style="width:' + ((s.aporte / a.amount) * 100).toFixed(1) + '%;background:' + c.color + '"></span></div>' + idea + '</div>'
+          );
+        })
+        .join('');
+      const over = a.rows.filter((r) => r.target + 0.03 < r.share && r.value > 0);
+      if (over.length) html += '<p class="faint" style="margin-top:8px">Acima do alvo (sem aporte agora): ' + over.map((r) => esc(P.classById(r.classId).title) + ' ' + U.pct(r.share)).join(', ') + '. Não é preciso vender: os próximos aportes equilibram a carteira.</p>';
+    }
+    html += '</div></div>';
+
+    // Prazo da meta
+    if (goal > 0 && pr) {
+      html += '<h4 style="margin-top:18px">Para chegar mais rápido à meta de ' + money(goal) + '</h4><div class="kpi-tiles">';
+      html += '<div class="kpi-tile static"><div class="l">Mantendo a carteira como está</div><div class="v">' + cmpMonths(pr.keep) + '</div></div>';
+      const followNote = pr.follow !== null && pr.keep !== null && pr.follow >= pr.keep ? '<div class="faint" style="margin-top:4px">' + (pr.follow === pr.keep ? 'Mesmo prazo, com a carteira mais diversificada.' : 'Prazo um pouco maior, com menos risco que o perfil atual.') + '</div>' : '';
+      html += '<div class="kpi-tile static"><div class="l">Seguindo a divisão sugerida</div><div class="v">' + cmpMonths(pr.follow, pr.keep) + '</div>' + followNote + '</div>';
+      if (pr.more !== null || a.amount > 0) html += '<div class="kpi-tile static"><div class="l">Aportando ' + money(pr.moreAmount) + '/mês (+25%)</div><div class="v">' + cmpMonths(pr.more, pr.keep) + '</div></div>';
+      if (pr.idle >= 1000) html += '<div class="kpi-tile static"><div class="l">Aplicando ' + money(pr.idle) + ' parados em conta</div><div class="v">' + cmpMonths(pr.idleMonths, pr.keep) + '</div></div>';
+      html += '</div>';
+    } else if (!(goal > 0)) {
+      html += '<p class="muted" style="margin-top:14px">Defina uma meta de patrimônio em <a href="#" class="linklike" data-action="go" data-id="settings"><strong>Ajustes</strong></a> para ver quanto tempo a sugestão economiza.</p>';
+    }
+
+    // Classes que ainda não tem (fora do alvo)
+    if (a.missing.length) {
+      html +=
+        '<h4 style="margin-top:18px">Para diversificar</h4><div class="list">' +
+        a.missing
+          .map((id) => P.planner.IDEAS[id].map((i) => '<div class="row"><i class="dot" style="background:' + P.classById(id).color + '"></i><div class="grow"><div class="title">' + esc(i.title) + ' <span class="tag">' + esc(P.classById(id).title) + '</span></div><div class="sub" style="white-space:normal">' + esc(i.why) + '</div></div></div>').join(''))
+          .join('') +
+        '</div>';
+    }
+
+    if (a.alerts.length) html += '<div class="alerts">' + a.alerts.map((al) => '<div class="alert-item"><span class="i">!</span><span>' + esc(al.text) + '</span></div>').join('') + '</div>';
+
+    html +=
+      '<p class="faint" style="margin-top:14px">Estimativa educativa, não é recomendação de investimento. Premissas: CDI de ' + U.pct(a.cdi || 0.11) + ' a.a.' + (a.cdi ? ' (últimos 12 meses)' : ' (padrão)') +
+      ' e rentabilidade esperada por classe (ajustável). Classes de maior retorno esperado também oscilam mais. Antes de investir, confira prazos, liquidez, impostos e taxas.</p>' +
+      '</section>';
+    return html;
+  }
+
+  /** Perfil, alocação-alvo, aporte mensal e premissas de rentabilidade. */
+  function openPlanForm() {
+    const data = store.data;
+    const plan = data.settings.plan || {};
+    const a = P.planner.analyze(data, new P.Analytics(data));
+    const defaults = P.planner.defaultReturns(a.cdi);
+    const profile = a.profile;
+    const current = profile === 'custom' ? plan.targets || {} : P.planner.PROFILES[profile].targets;
+    const pctIn = (v) => (v ? String(Math.round(v * 100) / 100).replace('.', ',') : '');
+    const rows = P.ASSET_CLASSES.map(
+      (c) =>
+        '<tr><td><i class="dot" style="background:' + c.color + '"></i> ' + esc(c.title) + '</td>' +
+        '<td class="num faint">' + U.pct(a.total > 0 ? (a.rows.find((r) => r.classId === c.id) || { share: 0 }).share : 0) + '</td>' +
+        '<td><input type="text" inputmode="decimal" data-target="' + c.id + '" value="' + pctIn(current[c.id]) + '" placeholder="0"></td>' +
+        '<td><input type="text" inputmode="decimal" data-ret="' + c.id + '" value="' + pctIn(a.returns[c.id] * 100) + '" data-default="' + pctIn(defaults[c.id] * 100) + '"></td></tr>'
+    ).join('');
+    openModal({
+      title: 'Perfil e aporte',
+      wide: true,
+      body:
+        '<div class="form-row">' +
+        field('Perfil', '<select name="profile">' + Object.keys(P.planner.PROFILES).map((k) => '<option value="' + k + '"' + (k === profile ? ' selected' : '') + '>' + esc(P.planner.PROFILES[k].title) + '</option>').join('') + '<option value="custom"' + (profile === 'custom' ? ' selected' : '') + '>Personalizado</option></select>', 'Escolher um perfil preenche a alocação-alvo. Editar os percentuais muda para Personalizado.') +
+        field('Aporte mensal (R$)', '<input type="text" inputmode="decimal" name="monthly" class="money-input" value="' + (plan.monthly > 0 ? U.editable(plan.monthly) : '') + '" placeholder="' + (a.suggestedAmount > 0 ? U.editable(a.suggestedAmount) : '0,00') + '">', a.suggestedAmount > 0 ? 'Em branco: sua média dos últimos 12 meses (' + U.money(a.suggestedAmount) + ').' : 'Quanto você pretende investir por mês.') +
+        '</div>' +
+        '<div style="overflow-x:auto"><table class="update-table plan-table"><thead><tr><th>Classe</th><th>Hoje</th><th>Alvo (%)</th><th>Rentab. esperada (% a.a.)</th></tr></thead><tbody>' + rows + '</tbody>' +
+        '<tfoot><tr><td><strong>Total do alvo</strong></td><td></td><td class="num plan-sum" id="plan-sum"></td><td class="faint">CDI: ' + U.pct(a.cdi || 0.11) + ' a.a.</td></tr></tfoot></table></div>' +
+        '<p class="faint">A rentabilidade esperada é usada só para projetar o prazo da meta. Os padrões seguem o CDI; ajuste conforme suas expectativas.</p>',
+      actions: [
+        { label: 'Restaurar padrões', left: true, onClick: (close) => (store.setSetting('plan', {}), close(), toast('Plano restaurado para o perfil Moderado.')) },
+        { label: 'Cancelar' },
+        {
+          label: 'Salvar',
+          cls: 'primary',
+          submit: true,
+          onClick: (close, form) => {
+            const targets = {};
+            $$('[data-target]', form).forEach((el) => {
+              const v = U.parseNumber(el.value);
+              if (v > 0) targets[el.dataset.target] = v;
+            });
+            const sum = Object.values(targets).reduce((x, y) => x + y, 0);
+            if (Math.abs(sum - 100) > 0.5) return toast('A alocação-alvo precisa somar 100% (hoje: ' + String(Math.round(sum * 10) / 10).replace('.', ',') + '%).');
+            const returns = {};
+            $$('[data-ret]', form).forEach((el) => {
+              if (el.value.trim() === el.dataset.default) return;
+              const v = U.parseNumber(el.value);
+              if (v !== null) returns[el.dataset.ret] = v / 100;
+            });
+            const profileSel = form.elements.profile.value;
+            const monthly = U.parseNumber(form.elements.monthly.value);
+            const next = { profile: profileSel, monthly: monthly > 0 ? monthly : 0, returns };
+            if (profileSel === 'custom') next.targets = targets;
+            store.setSetting('plan', next);
+            close();
+            toast('Plano salvo.');
+          },
+        },
+      ],
+      onOpen: (form) => {
+        const sumEl = $('#plan-sum', form);
+        const updateSum = () => {
+          const s = $$('[data-target]', form).reduce((acc, el) => acc + (U.parseNumber(el.value) || 0), 0);
+          sumEl.textContent = String(Math.round(s * 10) / 10).replace('.', ',') + '%';
+          sumEl.classList.toggle('bad', Math.abs(s - 100) > 0.5);
+        };
+        form.elements.profile.addEventListener('change', (e) => {
+          const p = P.planner.PROFILES[e.target.value];
+          if (p) $$('[data-target]', form).forEach((el) => (el.value = pctIn(p.targets[el.dataset.target])));
+          updateSum();
+        });
+        $$('[data-target]', form).forEach((el) =>
+          el.addEventListener('input', () => {
+            form.elements.profile.value = 'custom';
+            updateSum();
+          })
+        );
+        updateSum();
+      },
+    });
   }
 
   function kpi(label, value) {
@@ -3582,7 +4286,7 @@ pre.code {
       '<span class="spacer"></span>' +
       '<button class="btn" data-action="new-institution">+ Instituição</button>' +
       '<button class="btn primary" data-action="new-asset">+ Investimento</button>' +
-      '</div><div id="portfolio-list"></div>';
+      '</div>' + pfBar(false) + '<div id="portfolio-list"></div>';
     $('#search').addEventListener('input', (e) => {
       state.search = e.target.value;
       renderPortfolioList();
@@ -3595,15 +4299,17 @@ pre.code {
   }
 
   function renderPortfolioList() {
+    C.destroyAll();
     const box = $('#portfolio-list');
     const q = U.norm(state.search);
     const assets = store.data.assets.filter(
-      (a) => (state.showArchived || !a.archived) && (!q || U.norm(a.name).includes(q) || U.norm(instName(a)).includes(q) || U.norm(a.ticker).includes(q))
+      (a) => (state.showArchived || !a.archived) && pfMatch(a, false) && (!q || U.norm(a.name).includes(q) || U.norm(instName(a)).includes(q) || U.norm(a.ticker).includes(q))
     );
     if (!store.data.assets.length) {
       box.innerHTML = '<div class="card empty"><h2>Nenhum investimento</h2><p>Adicione seus investimentos de cada banco ou corretora, ou importe sua planilha em Ajustes.</p><div class="actions"><button class="btn primary" data-action="new-asset">+ Adicionar investimento</button></div></div>';
       return;
     }
+    const picks = state.pfAssets.filter((id) => store.asset(id));
     const total = assets.reduce((acc, a) => acc + store.currentValue(a.id), 0);
     const groups = {};
     assets.forEach((a) => {
@@ -3619,20 +4325,42 @@ pre.code {
         title = inst ? inst.name : 'Sem instituição';
         color = inst ? inst.color : '#8E8E93';
       }
-      groups[key] = groups[key] || { title, color, assets: [], total: 0 };
+      groups[key] = groups[key] || { key, title, color, assets: [], total: 0 };
       groups[key].assets.push(a);
       groups[key].total += store.currentValue(a.id);
     });
     const list = Object.values(groups).sort((a, b) => b.total - a.total);
+    const pickTotal = picks.reduce((acc, id) => acc + store.currentValue(id), 0);
 
     let html =
-      '<div class="card" style="margin-bottom:16px"><div class="kpi-label">Total ' + (q ? 'filtrado' : 'na carteira') + '</div><div class="kpi-value num">' + money(total) + '</div>' +
-      '<div class="muted">' + assets.length + ' investimento(s) em ' + new Set(assets.map((a) => a.institutionId)).size + ' instituição(ões)</div></div>';
-    if (!list.length) html += '<div class="card empty"><p>Nada encontrado para "' + esc(state.search) + '".</p></div>';
+      '<div class="grid" style="margin-bottom:16px">' +
+      '<section class="card span-4"><div class="kpi-label">Total ' + (q || pfActive(false) ? 'filtrado' : 'na carteira') + '</div><div class="kpi-value num">' + money(total) + '</div>' +
+      '<div class="muted">' + assets.length + ' investimento(s) em ' + new Set(assets.map((a) => a.institutionId)).size + ' instituição(ões)</div>' +
+      (picks.length
+        ? '<div class="kpi-row"><div class="item"><div class="l">' + picks.length + ' selecionado(s)</div><div class="v num">' + money(pickTotal) + '</div></div></div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn small primary" data-action="pf-show-dashboard">Analisar no Início</button><button class="btn small" data-action="pf-clear-picks">Limpar seleção</button></div>'
+        : '<p class="faint" style="margin-top:12px">Marque ✓ nos investimentos para compará-los separados ou somados, aqui e no Início.</p>') +
+      '</section>';
+
+    // Gráfico: seleção (se houver) ou os investimentos da lista.
+    const scopeIds = new Set(picks.length ? picks : assets.map((a) => a.id));
+    const full = new P.Analytics(store.data);
+    const sub = full.subset((a) => scopeIds.has(a.id));
+    const split = state.portView === 'split';
+    const pct = state.portMetric === 'return';
+    html +=
+      '<section class="card span-8"><div class="card-head"><div><h3 class="card-title">' + (pct ? 'Rentabilidade acumulada' : 'Evolução') + '</h3><div class="card-sub">' +
+      (picks.length ? 'Investimentos selecionados' : 'Investimentos da lista') + (split ? ', separados' + (picks.length ? '' : ' por ' + (state.group === 'class' ? 'classe' : 'instituição')) : ', somados') + '</div></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + seg('portView', [['sum', 'Somados'], ['split', 'Separados']], state.portView) + seg('portMetric', [['value', 'R$'], ['return', '%']], state.portMetric) + seg('portPeriod', PERIODS, state.portPeriod) + '</div></div>' +
+      '<div class="chart-box"><canvas id="ch-port"></canvas></div><div id="port-table"></div></section></div>';
+
+    if (!list.length) html += '<div class="card empty"><p>Nada encontrado' + (state.search ? ' para "' + esc(state.search) + '"' : ' com esses filtros') + '.</p></div>';
     html += '<div class="grid">';
+    const groupFilter = state.group === 'class' ? state.pfClass : state.pfInst;
     list.forEach((grp) => {
       html +=
-        '<section class="card span-6"><div class="group-head"><span style="display:flex;align-items:center;gap:8px"><i class="dot" style="background:' + grp.color + '"></i>' + esc(grp.title) + '</span><span class="num">' + money(grp.total) + '</span></div><div class="list">';
+        '<section class="card span-6"><div class="group-head"><button class="linklike' + (groupFilter === grp.key ? ' on' : '') + '" style="display:flex;align-items:center;gap:8px" data-action="pf-toggle" data-id="' + esc((state.group === 'class' ? 'class:' : 'inst:') + grp.key) + '" title="' + (groupFilter === grp.key ? 'Mostrar todos' : 'Ver só ' + esc(grp.title)) + '"><i class="dot" style="background:' + grp.color + '"></i>' + esc(grp.title) + '</button>' +
+        '<span style="display:flex;align-items:center;gap:10px"><span class="num">' + money(grp.total) + '</span><button class="linklike faint" data-action="pf-pick-group" data-id="' + esc(grp.assets.map((a) => a.id).join(',')) + '" title="Selecionar todos deste grupo">✓ todos</button></span></div><div class="list">';
       grp.assets
         .sort((a, b) => store.currentValue(b.id) - store.currentValue(a.id))
         .forEach((a) => {
@@ -3640,10 +4368,13 @@ pre.code {
           const value = store.currentValue(a.id);
           const inv = store.invested(a.id);
           const gp = inv > 0 ? store.gain(a.id) / inv : null;
-          const sub = [state.group === 'class' ? instName(a) : c.title, a.indexer, total > 0 ? U.pct(value / total) : ''].filter(Boolean).join(' · ');
+          const sub2 = [state.group === 'class' ? instName(a) : c.title, a.indexer, total > 0 ? U.pct(value / total) : ''].filter(Boolean).join(' · ');
+          const on = picks.includes(a.id);
           html +=
-            '<div class="row clickable" data-action="open-asset" data-id="' + a.id + '">' + badge(c.title, c.color) +
-            '<div class="grow"><div class="title">' + esc(a.name) + (a.archived ? ' <span class="tag">arquivado</span>' : '') + '</div><div class="sub">' + esc(sub) + '</div></div>' +
+            '<div class="row clickable' + (on ? ' picked' : '') + '" data-action="open-asset" data-id="' + a.id + '">' +
+            '<button class="pick' + (on ? ' on' : '') + '" data-action="pf-pick" data-id="' + a.id + '" aria-pressed="' + on + '" title="Selecionar para comparar">✓</button>' +
+            badge(c.title, c.color) +
+            '<div class="grow"><div class="title">' + esc(a.name) + (a.archived ? ' <span class="tag">arquivado</span>' : '') + '</div><div class="sub">' + esc(sub2) + '</div></div>' +
             '<div class="right"><div class="num" style="font-weight:600">' + money(value) + '</div>' +
             (gp !== null ? '<div class="num ' + cls(gp) + '" style="font-size:12.5px">' + U.pct(gp, true) + '</div>' : '') +
             '</div></div>';
@@ -3652,6 +4383,65 @@ pre.code {
     });
     html += '</div>';
     box.innerHTML = html;
+    if (sub.assets.length) portfolioChart(sub, picks.length > 0);
+  }
+
+  /** Gráfico da Carteira: somado ou separado, em R$ ou em % acumulado. */
+  function portfolioChart(sub, byAsset) {
+    const canvas = $('#ch-port');
+    const period = state.portPeriod;
+    const months = sub.months(period);
+    const labels = months.map(U.fmtMonth);
+    const cdi = (store.data.benchmarks || {}).cdi || {};
+    const cumulativeSeries = (an) => {
+      const perf = months.map((m) => an.performanceFor(m));
+      const out = [];
+      let acc = 1;
+      let started = false;
+      perf.forEach((p) => {
+        if (p.rate === null && !started) return out.push(null);
+        started = true;
+        acc *= 1 + (p.rate || 0);
+        out.push(acc - 1);
+      });
+      return out;
+    };
+    let series;
+    let groups = [];
+    if (state.portView === 'sum') {
+      if (state.portMetric === 'value') return C.evolution(canvas, sub.evolution(period), hidden());
+      series = [{ label: 'Rentabilidade', color: C.theme().accent, data: cumulativeSeries(sub), width: 2.5 }];
+      const cdiRates = months.map((m) => (m in cdi ? cdi[m] : null));
+      const first = series[0].data.findIndex((v) => v !== null);
+      if (first >= 0 && cdiRates.some((r) => r !== null)) {
+        let acc = 1;
+        series.push({ label: 'CDI', color: C.theme().orange, width: 1.5, data: cdiRates.map((r, i) => (i < first ? null : ((acc *= 1 + (r || 0)), acc - 1))) });
+      }
+    } else {
+      const mode = byAsset ? 'asset' : state.group === 'class' ? 'class' : 'inst';
+      groups = capGroups(groupsOf(sub, mode), byAsset ? 10 : 8);
+      series = groups.map((grp) => {
+        const ids = new Set(grp.ids);
+        const an = sub.subset((a) => ids.has(a.id));
+        if (state.portMetric === 'return') return { label: grp.label, color: grp.color, data: cumulativeSeries(an) };
+        return { label: grp.label, color: grp.color, data: months.map((m) => an.total(an.cutoff(m))) };
+      });
+    }
+    C.lines(canvas, labels, series, hidden(), state.portMetric === 'return');
+
+    // Tabela-resumo dos separados.
+    if (groups.length) {
+      const rows = groups.map((grp, i) => {
+        const data = series[i].data;
+        const lastVal = data.length ? data[data.length - 1] : null;
+        const ids = new Set(grp.ids);
+        const an = sub.subset((a) => ids.has(a.id));
+        const cum = cumulativeSeries(an);
+        const rate = cum.length ? cum[cum.length - 1] : null;
+        return '<tr><td><i class="dot" style="background:' + grp.color + '"></i> ' + esc(grp.label) + '</td><td class="num" style="text-align:right">' + money(state.portMetric === 'return' ? an.total() : lastVal || 0) + '</td><td class="num ' + (rate === null ? 'muted' : cls(rate)) + '" style="text-align:right">' + (rate === null ? '—' : U.pct(rate, true)) + '</td></tr>';
+      });
+      $('#port-table').innerHTML = '<table class="update-table" style="margin-top:12px"><thead><tr><th>' + (byAsset ? 'Investimento' : state.group === 'class' ? 'Classe' : 'Instituição') + '</th><th style="text-align:right">Saldo</th><th style="text-align:right">Rentab. no período</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+    }
   }
 
   // =====================================================================

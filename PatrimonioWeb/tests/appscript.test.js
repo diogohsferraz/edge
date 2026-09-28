@@ -10,7 +10,7 @@ function loadCore() {
   const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'statement.js', 'invoice.js', 'sample.js']) {
+  for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'planner.js', 'statement.js', 'invoice.js', 'sample.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'js', f), 'utf8'), ctx);
   }
   return ctx.Patrimonio;
@@ -96,4 +96,13 @@ test('grupo de parcelas e regras de parcelas sobrevivem à planilha', () => {
   const back = JSON.parse(ctx.getData());
   assert.equal(back.transactions[0].group, 'parc:1234:2025-04-22:claro:21');
   assert.equal(back.settings.installmentRules['parc:1234:2025-04-22:claro:21'], 'contas');
+});
+
+test('plano de aportes sobrevive à planilha', () => {
+  const { ctx } = loadGas();
+  const d = { institutions: [], assets: [], snapshots: [], movements: [], transactions: [], settings: { plan: { profile: 'custom', monthly: 1500, targets: { rendaFixa: 60, acoes: 40 } } }, benchmarks: {} };
+  ctx.saveData(JSON.stringify(d));
+  const back = JSON.parse(ctx.getData());
+  assert.equal(back.settings.plan.monthly, 1500);
+  assert.equal(back.settings.plan.targets.acoes, 40);
 });
