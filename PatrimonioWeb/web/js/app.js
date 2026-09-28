@@ -19,6 +19,9 @@
     showArchived: false,
     search: '',
     cashMonth: U.monthKey(U.today()),
+    cashType: 'all',
+    cashCategory: null,
+    cashDay: null,
     updateDate: U.today(),
     entries: {},
     benchError: null,
@@ -134,7 +137,9 @@
     if (segBtn) {
       const key = segBtn.dataset.seg;
       const raw = segBtn.dataset.val;
-      state[key] = /^\d+$/.test(raw) ? Number(raw) : raw;
+      const value = /^\d+$/.test(raw) ? Number(raw) : raw;
+      if (key.startsWith('cash')) return setCashFilter({ [key]: value });
+      state[key] = value;
       render();
       return;
     }
@@ -181,14 +186,11 @@
       const t = store.data.transactions.find((x) => x.id === id);
       openTransactionForm(t, t.income);
     },
-    'cash-prev': () => {
-      state.cashMonth = U.addMonths(state.cashMonth, -1);
-      render();
-    },
-    'cash-next': () => {
-      state.cashMonth = U.addMonths(state.cashMonth, 1);
-      render();
-    },
+    'cash-filter': (json) => setCashFilter(JSON.parse(json)),
+    'cash-cat': (id) => setCashFilter({ cashCategory: state.cashCategory === id ? null : id, cashDay: state.cashDay }),
+    'cash-day': (day) => setCashFilter({ cashDay: state.cashDay === day ? null : day }),
+    'cash-prev': () => setCashFilter({ cashMonth: U.addMonths(state.cashMonth, -1), cashDay: null }),
+    'cash-next': () => setCashFilter({ cashMonth: U.addMonths(state.cashMonth, 1), cashDay: null }),
     sample: async () => {
       if (store.data.assets.length) {
         const ok = await confirmDialog('Carregar dados de exemplo?', 'Investimentos e lançamentos fictícios serão adicionados aos seus dados atuais.', 'Carregar');
@@ -703,75 +705,187 @@
   // Orçamento
   // =====================================================================
 
+  /** Filtros do Orçamento: tipo (receitas/despesas), categoria e dia. */
+  function cashFilters() {
+    return { type: state.cashType || 'all', category: state.cashCategory || null, day: state.cashDay || null };
+  }
+
+  function setCashFilter(patch) {
+    Object.assign(state, patch);
+    // Categoria de receita não combina com filtro de despesas (e vice-versa).
+    if (state.cashCategory) {
+      const c = P.categoryById(state.cashCategory);
+      if ((state.cashType === 'income' && !c.income) || (state.cashType === 'expense' && c.income)) state.cashCategory = null;
+    }
+    if (state.cashDay && U.monthKey(state.cashDay) !== state.cashMonth) state.cashDay = null;
+    render();
+  }
+
+  function matchesCash(t, f, opts) {
+    opts = opts || {};
+    if (f.type === 'income' && !t.income) return false;
+    if (f.type === 'expense' && t.income) return false;
+    if (f.category && !opts.ignoreCategory && t.category !== f.category) return false;
+    if (f.day && !opts.ignoreDay && t.date !== f.day) return false;
+    return true;
+  }
+
   function renderCashflow(view) {
     const txs = store.data.transactions;
     const mk = state.cashMonth;
-    const items = txs.filter((t) => U.monthKey(t.date) === mk);
-    const income = items.filter((t) => t.income).reduce((a, t) => a + t.amount, 0);
-    const expense = items.filter((t) => !t.income).reduce((a, t) => a + t.amount, 0);
+    const f = cashFilters();
+    const monthItems = txs.filter((t) => U.monthKey(t.date) === mk);
+    const income = monthItems.filter((t) => t.income).reduce((a, t) => a + t.amount, 0);
+    const expense = monthItems.filter((t) => !t.income).reduce((a, t) => a + t.amount, 0);
     const balance = income - expense;
+    const selCat = f.category ? P.categoryById(f.category) : null;
 
+    // Rosca: categorias do tipo escolhido (despesas por padrão), respeitando o filtro de dia.
+    const donutIncome = f.type === 'income' || (selCat && selCat.income);
     const byCat = {};
-    items.filter((t) => !t.income).forEach((t) => {
-      const c = P.categoryById(t.category);
-      byCat[c.id] = byCat[c.id] || { label: c.title, color: c.color, value: 0 };
-      byCat[c.id].value += t.amount;
-    });
+    monthItems
+      .filter((t) => t.income === !!donutIncome && (!f.day || t.date === f.day))
+      .forEach((t) => {
+        const c = P.categoryById(t.category);
+        byCat[c.id] = byCat[c.id] || { key: c.id, label: c.title, color: c.color, value: 0, count: 0 };
+        byCat[c.id].value += t.amount;
+        byCat[c.id].count++;
+      });
     const cats = Object.values(byCat).sort((a, b) => b.value - a.value);
-    cats.forEach((c) => (c.share = expense ? c.value / expense : 0));
+    const catTotal = cats.reduce((a, c) => a + c.value, 0);
+    cats.forEach((c) => (c.share = catTotal ? c.value / catTotal : 0));
 
+    // Últimos 6 meses: acompanha o filtro de tipo/categoria.
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const m = U.addMonths(mk, -i);
       const list = txs.filter((t) => U.monthKey(t.date) === m);
-      months.push({ month: m, income: list.filter((t) => t.income).reduce((a, t) => a + t.amount, 0), expense: list.filter((t) => !t.income).reduce((a, t) => a + t.amount, 0) });
+      months.push({
+        month: m,
+        income: list.filter((t) => t.income).reduce((a, t) => a + t.amount, 0),
+        expense: list.filter((t) => !t.income).reduce((a, t) => a + t.amount, 0),
+        filtered: list.filter((t) => matchesCash(t, f, { ignoreDay: true })).reduce((a, t) => a + t.amount, 0),
+      });
     }
+    const theme = C.theme();
+    let series;
+    if (selCat) series = [{ key: selCat.income ? 'income' : 'expense', label: selCat.title, color: selCat.color, values: months.map((m) => m.filtered) }];
+    else if (f.type === 'income') series = [{ key: 'income', label: 'Receitas', color: theme.green, values: months.map((m) => m.income) }];
+    else if (f.type === 'expense') series = [{ key: 'expense', label: 'Despesas', color: theme.red, values: months.map((m) => m.expense) }];
 
+    // Por dia do mês (filtro atual, sem o filtro de dia).
+    const dim = U.daysInMonth(mk);
+    const daily = [];
+    for (let d = 1; d <= dim; d++) {
+      const day = mk + '-' + String(d).padStart(2, '0');
+      const dayType = f.type === 'all' && !selCat ? 'expense' : null;
+      const value = monthItems
+        .filter((t) => t.date === day && matchesCash(t, dayType ? Object.assign({}, f, { type: dayType }) : f, { ignoreDay: true }))
+        .reduce((a, t) => a + t.amount, 0);
+      daily.push({ day, value });
+    }
+    const dailyLabel = selCat ? selCat.title : f.type === 'income' ? 'Receitas' : 'Despesas';
+    const dailyColor = selCat ? selCat.color : f.type === 'income' ? theme.green : theme.red;
+
+    // Lançamentos filtrados
+    const items = monthItems.filter((t) => matchesCash(t, f));
+    const filteredTotal = items.reduce((a, t) => a + (t.income ? t.amount : -t.amount), 0);
     const days = {};
     items.forEach((t) => (days[t.date] = days[t.date] || []).push(t));
     const dayKeys = Object.keys(days).sort().reverse();
 
+    const chip = (label, patch) =>
+      '<button class="chip active-filter" data-action="cash-filter" data-id="' + esc(JSON.stringify(patch)) + '">' + esc(label) + ' <span aria-hidden="true">×</span></button>';
+    const chips = [];
+    if (f.type !== 'all') chips.push(chip(f.type === 'income' ? 'Receitas' : 'Despesas', { cashType: 'all' }));
+    if (selCat) chips.push(chip(selCat.title, { cashCategory: null }));
+    if (f.day) chips.push(chip('Dia ' + U.fmtShortDate(f.day), { cashDay: null }));
+    const filterBar = chips.length
+      ? '<div class="filter-bar"><span class="faint">Filtrando:</span>' + chips.join('') + '<button class="btn small ghost" data-action="cash-filter" data-id="' + esc(JSON.stringify({ cashType: 'all', cashCategory: null, cashDay: null })) + '">Limpar filtros</button></div>'
+      : '<div class="filter-bar faint">Clique nos gráficos, nas categorias ou nos totais para filtrar.</div>';
+
+    const tile = (label, value, valueCls, type, extra) =>
+      '<button class="kpi-tile' + (type !== 'all' && f.type === type ? ' selected' : '') + '" title="' + (type === 'all' ? 'Mostrar tudo' : 'Filtrar ' + esc(label.toLowerCase())) + '" data-action="cash-filter" data-id="' + esc(JSON.stringify({ cashType: type !== 'all' && f.type === type ? 'all' : type, cashCategory: null })) + '">' +
+      '<div class="l">' + esc(label) + '</div><div class="v num ' + valueCls + '">' + value + '</div>' + (extra || '') + '</button>';
+
     view.innerHTML =
       '<div class="toolbar"><button class="btn small" data-action="cash-prev">‹</button><strong style="min-width:170px;text-align:center">' + U.fmtMonthLong(mk) + '</strong><button class="btn small" data-action="cash-next">›</button>' +
       '<span class="spacer"></span><button class="btn" data-action="import-statement">Importar extrato</button><button class="btn" data-action="import-invoice">Importar fatura (PDF)</button><button class="btn" data-action="new-income">+ Receita</button><button class="btn primary" data-action="new-expense">+ Despesa</button></div>' +
+      filterBar +
       '<div class="grid">' +
-      '<section class="card span-12"><div class="kpi-row" style="margin:0;padding:0;border:0">' +
-      kpi('Receitas', '<span class="pos">' + money(income) + '</span>') +
-      kpi('Despesas', '<span class="neg">' + money(expense) + '</span>') +
-      kpi('Saldo do mês', '<span class="' + cls(balance) + '">' + money(balance) + '</span>') +
-      (income > 0 ? kpi('Taxa de poupança', U.pct(balance / income)) : '') +
+      '<section class="card span-12"><div class="kpi-tiles">' +
+      tile('Receitas', money(income), 'pos', 'income') +
+      tile('Despesas', money(expense), 'neg', 'expense') +
+      tile('Saldo do mês', money(balance), cls(balance), 'all', income > 0 ? '<div class="faint">Taxa de poupança ' + U.pct(balance / income) + '</div>' : '') +
+      (selCat
+        ? '<div class="kpi-tile static"><div class="l">' + esc(selCat.title) + '</div><div class="v num">' + money(monthItems.filter((t) => t.category === selCat.id).reduce((a, t) => a + t.amount, 0)) + '</div><div class="faint">' +
+          U.pct(cats.find((c) => c.key === selCat.id) ? cats.find((c) => c.key === selCat.id).share : 0) + ' das ' + (selCat.income ? 'receitas' : 'despesas') + '</div></div>'
+        : '') +
       '</div>' +
       (income > 0 ? '<div class="progress" style="margin-top:14px"><span style="width:' + Math.min(100, (expense / income) * 100).toFixed(1) + '%;background:' + (expense > income ? 'var(--red)' : 'var(--orange)') + '"></span></div><div class="faint" style="margin-top:6px">Você gastou ' + U.pct(expense / income) + ' do que recebeu.</div>' : '') +
       '</section>' +
-      '<section class="card span-5"><h3 class="card-title">Gastos por categoria</h3>' +
+      '<section class="card span-5"><div class="card-head"><h3 class="card-title">' + (donutIncome ? 'Receitas' : 'Gastos') + ' por categoria' + (f.day ? ' · ' + U.fmtShortDate(f.day) : '') + '</h3>' +
+      seg('cashType', [['all', 'Tudo'], ['expense', 'Despesas'], ['income', 'Receitas']], f.type) + '</div>' +
       (cats.length
-        ? '<div class="chart-box donut" style="margin-top:10px"><canvas id="ch-cats"></canvas></div><div class="list" style="margin-top:10px">' +
-          cats.map((c) => '<div class="row"><i class="dot" style="background:' + c.color + '"></i><div class="grow title">' + esc(c.label) + '</div><div class="num">' + money(c.value) + '</div><div class="muted num" style="width:60px;text-align:right">' + U.pct(c.share) + '</div></div>').join('') +
+        ? '<div class="chart-box donut" style="margin-top:6px"><canvas id="ch-cats"></canvas></div><div class="list" style="margin-top:10px">' +
+          cats
+            .map(
+              (c) =>
+                '<div class="row clickable cat-row' + (selCat && selCat.id === c.key ? ' selected' : selCat ? ' dimmed' : '') + '" data-action="cash-cat" data-id="' + c.key + '">' +
+                '<i class="dot" style="background:' + c.color + '"></i><div class="grow"><div class="title">' + esc(c.label) + '</div><div class="sub">' + c.count + ' lançamento(s)</div></div>' +
+                '<div class="num">' + money(c.value) + '</div><div class="muted num" style="width:60px;text-align:right">' + U.pct(c.share) + '</div></div>'
+            )
+            .join('') +
           '</div>'
-        : '<p class="muted">Nenhuma despesa neste mês.</p>') +
+        : '<p class="muted">Nenhum lançamento ' + (donutIncome ? 'de receita' : 'de despesa') + ' neste mês.</p>') +
       '</section>' +
-      '<section class="card span-7"><h3 class="card-title">Últimos 6 meses</h3><div class="chart-box" style="margin-top:10px"><canvas id="ch-cash"></canvas></div></section>' +
-      '<section class="card span-12"><h3 class="card-title">Lançamentos</h3>' +
+      '<section class="card span-7"><div class="card-head"><div><h3 class="card-title">Últimos 6 meses' + (selCat ? ' · ' + esc(selCat.title) : '') + '</h3><div class="card-sub">Clique numa barra para ver o mês</div></div></div><div class="chart-box" style="margin-top:4px;height:230px"><canvas id="ch-cash"></canvas></div>' +
+      '<h3 class="card-title" style="margin-top:14px">' + esc(dailyLabel) + ' por dia</h3><div class="card-sub">Clique num dia para ver os lançamentos</div><div class="chart-box sm" style="margin-top:6px"><canvas id="ch-daily"></canvas></div></section>' +
+      '<section class="card span-12"><div class="card-head"><h3 class="card-title">Lançamentos' + (chips.length ? ' filtrados' : '') + '</h3><div class="num muted">' + items.length + ' · ' + (hidden() ? U.MASK : U.signedMoney(filteredTotal)) + '</div></div>' +
       (dayKeys.length
         ? dayKeys
             .map(
               (d) =>
-                '<div class="group-head" style="margin-top:12px">' + U.fmtDate(d) + '</div><div class="list">' +
+                '<div class="group-head" style="margin-top:12px"><button class="linklike" data-action="cash-day" data-id="' + d + '">' + U.fmtDate(d) + '</button><span class="num">' + money(days[d].reduce((a, t) => a + (t.income ? t.amount : -t.amount), 0)) + '</span></div><div class="list">' +
                 days[d]
                   .sort((a, b) => b.amount - a.amount)
                   .map((t) => {
                     const c = P.categoryById(t.category);
-                    return '<div class="row clickable" data-action="edit-tx" data-id="' + t.id + '">' + badge(c.title, c.color) + '<div class="grow"><div class="title">' + esc(t.note || c.title) + '</div><div class="sub">' + esc(c.title) + '</div></div><div class="num ' + (t.income ? 'pos' : '') + '" style="font-weight:600">' + (t.income ? '+' : '−') + money(t.amount) + '</div></div>';
+                    return (
+                      '<div class="row clickable" data-action="edit-tx" data-id="' + t.id + '">' + badge(c.title, c.color) +
+                      '<div class="grow"><div class="title">' + esc(t.note || c.title) + '</div>' +
+                      '<button class="chip small-chip" data-action="cash-cat" data-id="' + c.id + '" title="Filtrar por ' + esc(c.title) + '"><i class="dot" style="background:' + c.color + '"></i>' + esc(c.title) + '</button></div>' +
+                      '<div class="num ' + (t.income ? 'pos' : '') + '" style="font-weight:600">' + (t.income ? '+' : '−') + money(t.amount) + '</div></div>'
+                    );
                   })
                   .join('') +
                 '</div>'
             )
             .join('')
-        : '<p class="muted">Nenhum lançamento neste mês. Use "+ Despesa" ou "+ Receita".</p>') +
+        : '<p class="muted">' + (chips.length ? 'Nenhum lançamento com esses filtros.' : 'Nenhum lançamento neste mês. Use "+ Despesa" ou "+ Receita".') + '</p>') +
       '</section></div>';
 
-    if (cats.length) C.donut($('#ch-cats'), cats, hidden());
-    C.cashBars($('#ch-cash'), months, hidden());
+    if (cats.length) {
+      C.donut($('#ch-cats'), cats, hidden(), {
+        selected: selCat ? selCat.id : null,
+        onClick: (slice) => setCashFilter({ cashCategory: state.cashCategory === slice.key ? null : slice.key }),
+      });
+    }
+    C.cashBars($('#ch-cash'), months, hidden(), {
+      current: mk,
+      series,
+      onClick: (month, key) => {
+        const patch = { cashMonth: month, cashDay: null };
+        if (key && !selCat) patch.cashType = key;
+        setCashFilter(patch);
+      },
+    });
+    C.dailyBars($('#ch-daily'), daily, hidden(), {
+      selected: f.day,
+      color: dailyColor,
+      label: dailyLabel,
+      onClick: (day) => setCashFilter({ cashDay: state.cashDay === day ? null : day }),
+    });
   }
 
   // =====================================================================

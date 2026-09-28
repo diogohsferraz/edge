@@ -113,18 +113,29 @@
     });
   };
 
-  C.donut = function (canvas, slices, hidden) {
+  /** Esmaece uma cor "#RRGGBB" (itens não selecionados). */
+  const dim = (hex) => (/^#[0-9a-f]{6}$/i.test(hex) ? hex + '40' : hex);
+  const pointer = (evt, els) => {
+    if (evt.native && evt.native.target) evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+  };
+
+  /** opts: { selected: key, onClick(slice) } */
+  C.donut = function (canvas, slices, hidden, opts) {
     const t = C.theme();
+    opts = opts || {};
+    const colors = slices.map((s) => (opts.selected && s.key !== opts.selected ? dim(s.color) : s.color));
     return make(canvas, {
       type: 'doughnut',
       data: {
         labels: slices.map((s) => s.label),
-        datasets: [{ data: slices.map((s) => s.value), backgroundColor: slices.map((s) => s.color), borderColor: t.surface, borderWidth: 2, hoverOffset: 6 }],
+        datasets: [{ data: slices.map((s) => s.value), backgroundColor: colors, borderColor: t.surface, borderWidth: 2, hoverOffset: 6, offset: slices.map((s) => (opts.selected && s.key === opts.selected ? 10 : 0)) }],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         cutout: '64%',
+        onClick: opts.onClick ? (evt, els) => els.length && opts.onClick(slices[els[0].index]) : undefined,
+        onHover: opts.onClick ? pointer : undefined,
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: (ctx) => ' ' + ctx.label + ': ' + (hidden ? U.MASK : U.money(ctx.parsed)) + ' (' + U.pct(slices[ctx.dataIndex].share) + ')' } },
@@ -209,20 +220,63 @@
     });
   };
 
-  C.cashBars = function (canvas, months, hidden) {
+  /**
+   * Barras mensais de receitas/despesas.
+   * opts: { current: 'AAAA-MM', series: [{key, label, color, values}], onClick(month, seriesKey) }
+   */
+  C.cashBars = function (canvas, months, hidden, opts) {
     const t = C.theme();
-    const opts = base(hidden, t, U.money);
-    opts.plugins.legend = { display: true, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    opts = opts || {};
+    const series = opts.series || [
+      { key: 'income', label: 'Receitas', color: t.green, values: months.map((m) => m.income) },
+      { key: 'expense', label: 'Despesas', color: t.red, values: months.map((m) => m.expense) },
+    ];
+    const opt = base(hidden, t, U.money);
+    opt.plugins.legend = { display: series.length > 1, position: 'bottom', labels: { color: t.text, boxWidth: 10, boxHeight: 10, usePointStyle: true } };
+    if (opts.onClick) {
+      opt.onClick = (evt, els) => {
+        // Clique na barra: mês + série. Clique no espaço do mês: só o mês.
+        if (els.length) return opts.onClick(months[els[0].index].month, series[els[0].datasetIndex].key);
+        const x = evt.chart.scales.x.getValueForPixel(evt.x);
+        if (x !== undefined && months[Math.round(x)]) opts.onClick(months[Math.round(x)].month, null);
+      };
+      opt.onHover = pointer;
+    }
+    opt.interaction = { mode: 'nearest', intersect: true };
     return make(canvas, {
       type: 'bar',
       data: {
         labels: months.map((m) => U.fmtMonth(m.month)),
-        datasets: [
-          { label: 'Receitas', data: months.map((m) => m.income), backgroundColor: t.green, borderRadius: 4 },
-          { label: 'Despesas', data: months.map((m) => m.expense), backgroundColor: t.red, borderRadius: 4 },
-        ],
+        datasets: series.map((s) => ({
+          label: s.label,
+          data: s.values,
+          backgroundColor: months.map((m) => (opts.current && m.month !== opts.current ? dim(s.color) : s.color)),
+          borderRadius: 4,
+        })),
       },
-      options: opts,
+      options: opt,
+    });
+  };
+
+  /** Barras por dia do mês. opts: { selected: 'AAAA-MM-DD', color, onClick(day) } */
+  C.dailyBars = function (canvas, days, hidden, opts) {
+    const t = C.theme();
+    opts = opts || {};
+    const color = opts.color || t.accent;
+    const opt = base(hidden, t, U.money);
+    opt.interaction = { mode: 'nearest', intersect: true };
+    opt.scales.x.ticks.maxTicksLimit = 10;
+    if (opts.onClick) {
+      opt.onClick = (evt, els) => els.length && opts.onClick(days[els[0].index].day);
+      opt.onHover = pointer;
+    }
+    return make(canvas, {
+      type: 'bar',
+      data: {
+        labels: days.map((d) => d.day.slice(8, 10)),
+        datasets: [{ label: opts.label || 'Total', data: days.map((d) => d.value), backgroundColor: days.map((d) => (opts.selected && d.day !== opts.selected ? dim(color) : color)), borderRadius: 3 }],
+      },
+      options: opt,
     });
   };
 })(typeof window !== 'undefined' ? window : globalThis);
