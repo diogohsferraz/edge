@@ -88,6 +88,21 @@
     };
   };
 
+  /** Backend cuja primeira leitura devolve `first` (já lido), sem buscar de novo. */
+  V.primed = function (backend, first) {
+    let used = false;
+    const load = backend.load;
+    return Object.assign({}, backend, {
+      async load() {
+        if (!used) {
+          used = true;
+          return first;
+        }
+        return load.call(backend);
+      },
+    });
+  };
+
   /** Envolve um backend para ler e gravar criptografado com a sessão aberta. */
   V.wrap = function (inner, session) {
     return Object.assign({}, inner, {

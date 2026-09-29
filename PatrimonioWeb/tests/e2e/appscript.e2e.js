@@ -53,6 +53,11 @@ const page_html = read('Index.html').replace(/<\?!= include\('(\w+)'\); \?>/g, (
   await page.reload();
   await page.waitForSelector('#ch-evo');
   const totalAfterReload = await page.textContent('.kpi-value');
+  // Com dados e sem senha, o app sugere proteger: "Agora não" fica gravado na planilha.
+  await page.waitForSelector('.modal-head h2');
+  const offer = await page.textContent('.modal-head h2');
+  await page.click('.modal-foot .btn:not(.primary)');
+  await page.waitForSelector('.modal', { state: 'detached' });
   await page.click('.nav-item[data-view="settings"]');
   await page.waitForTimeout(500);
   const info = await page.textContent('#storage-info');
@@ -72,11 +77,38 @@ const page_html = read('Index.html').replace(/<\?!= include\('(\w+)'\); \?>/g, (
   await page.waitForSelector('.modal');
   const exportMsg = await page.textContent('.modal-body');
   if (outDir) await page.screenshot({ path: path.join(outDir, 'appscript-settings.png') });
+  await page.click('.modal-foot .btn');
+  await page.waitForSelector('.modal', { state: 'detached' });
+
+  // Usuário e senha: a planilha passa a ter só a aba Cofre, criptografada.
+  await page.click('[data-action="protect-create"]');
+  await page.fill('input[name="user"]', 'Diogo');
+  await page.fill('input[name="password"]', 'segredo123');
+  await page.fill('input[name="password2"]', 'segredo123');
+  await page.check('input[name="ack"]');
+  await page.click('.modal-foot .btn.primary');
+  await page.waitForSelector('.modal', { state: 'detached' });
+  const sheetsAfter = gas.ss._sheets.map((s) => s.name);
+  const vaultText = JSON.stringify(gas.ss.getSheetByName('Cofre') ? gas.ss.getSheetByName('Cofre')._cells : []);
+  await page.reload();
+  await page.waitForSelector('.lock-screen');
+  if (outDir) await page.screenshot({ path: path.join(outDir, 'appscript-lock.png') });
+  await page.fill('.lock-screen input[name="user"]', 'diogo');
+  await page.fill('.lock-screen input[name="password"]', 'segredo123');
+  await page.click('.lock-screen button[type="submit"]');
+  await page.waitForSelector('#ch-evo');
+  const totalAfterLogin = await page.textContent('.kpi-value');
+  // Bloquear agora: pede a senha de novo sem recarregar a página.
+  await page.click('.nav-item[data-view="settings"]');
+  await page.click('[data-action="lock-now"]');
+  await page.waitForSelector('.lock-screen');
+  const lockedAgain = await page.isVisible('.lock-screen');
   await browser.close();
 
-  const result = { label, rowsSaved, totalAfterReload, info, invoiceSelected, invoiceRows, exportMsg: exportMsg.trim(), driveFiles: gas.files.map((f) => f.name), errors };
+  const result = { label, rowsSaved, totalAfterReload, totalAfterLogin, offer, sheetsAfter, lockedAgain, info, invoiceSelected, invoiceRows, exportMsg: exportMsg.trim(), driveFiles: gas.files.map((f) => f.name), errors };
   console.log(JSON.stringify(result, null, 2));
-  const ok = label.includes('Planilha Google') && rowsSaved > 100 && /R\$/.test(totalAfterReload) && gas.files.length === 1 && invoiceRows === 13 && /1\.371,00/.test(invoiceSelected) && !errors.length;
+  const ok = label.includes('Planilha Google') && rowsSaved > 100 && /R\$/.test(totalAfterReload) && gas.files.length === 1 && invoiceRows === 13 && /1\.371,00/.test(invoiceSelected) &&
+    /Proteja/.test(offer) && sheetsAfter.join() === 'Cofre' && !vaultText.includes('Tesouro') && totalAfterLogin === totalAfterReload && lockedAgain && !errors.length;
   process.exit(ok ? 0 : 1);
 })().catch((e) => {
   console.error(e);

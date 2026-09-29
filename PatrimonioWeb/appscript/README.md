@@ -49,4 +49,6 @@ clasp push
 - Os arquivos exportados (CSV e backup) são salvos no seu Google Drive.
 - CDI e IPCA são buscados no Banco Central pelo próprio script.
 
-Dá para editar os dados direto na planilha. Só não mude os nomes das abas nem a ordem das colunas, e mantenha a coluna **ID** preenchida.
+**Usuário e senha (opcional):** em **Ajustes › Segurança › Criar usuário e senha**, o app passa a pedir o acesso ao abrir, além do login do Google. Os dados passam a ficar criptografados numa aba única, **Cofre**, e as outras abas são apagadas: quem abrir a planilha não consegue ler nada. A senha não tem recuperação, então exporte um backup antes. Removendo a proteção, as abas legíveis voltam.
+
+Sem senha, dá para editar os dados direto na planilha. Só não mude os nomes das abas nem a ordem das colunas, e mantenha a coluna **ID** preenchida.

@@ -76,17 +76,19 @@
   /** Abre o app. Se os dados estão protegidos, pede usuário e senha antes. */
   async function init() {
     rawBackend = P.detectBackend();
-    let backend = rawBackend;
-    if (rawBackend.id !== 'appsscript') {
-      let raw = null;
-      try {
-        raw = await rawBackend.load();
-      } catch (e) {
-        raw = null; // o erro aparece de novo (com mensagem) no carregamento normal
-      }
-      if (P.vault.isEnvelope(raw)) backend = P.vault.wrap(rawBackend, await unlock(raw));
+    let raw;
+    try {
+      raw = await rawBackend.load();
+    } catch (e) {
+      return start(rawBackend); // o erro aparece (com mensagem) no carregamento normal
     }
-    start(backend);
+    let session = null;
+    if (P.vault.isEnvelope(raw)) {
+      session = await unlock(raw);
+      if (!session) raw = null; // dados apagados em "Esqueci a senha"
+    }
+    // A primeira leitura já foi feita: reaproveita para não buscar tudo de novo.
+    start(P.vault.primed(session ? P.vault.wrap(rawBackend, session) : rawBackend, session ? await P.vault.decrypt(session, raw) : raw));
   }
 
   function start(backend) {
@@ -133,7 +135,8 @@
   // Acesso com usuário e senha
   // =====================================================================
 
-  const protectable = () => rawBackend && rawBackend.id !== 'appsscript' && P.vault.available();
+  const protectable = () => rawBackend && P.vault.available();
+  const placeName = () => (rawBackend.id === 'desktop' ? 'neste computador' : rawBackend.id === 'appsscript' ? 'na sua Planilha Google' : 'neste navegador');
   const LOCK_ICON = '<svg viewBox="0 0 24 24" width="44" height="44" style="color:var(--accent)"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9zm3 7a2 2 0 0 1 1 3.73V20h-2v-2.27A2 2 0 0 1 12 14z"/></svg>';
 
   /** Tela de entrada. Resolve com a sessão (chave) quando usuário e senha conferem. */
@@ -192,7 +195,8 @@
         $('[data-wipe]', box).addEventListener('click', async () => {
           if ($('[data-confirm]', box).value.trim().toUpperCase() !== 'APAGAR') return ($('[data-confirm]', box).focus(), undefined);
           await rawBackend.save(P.emptyData());
-          g.location.reload();
+          wrap.remove();
+          resolve(null);
         });
       });
     });
@@ -200,16 +204,33 @@
 
   /** Bloqueia depois de 15 minutos sem uso (grava as pendências antes). */
   function startAutoLock() {
+    if (startAutoLock.on) return;
+    startAutoLock.on = true;
     let last = Date.now();
     ['mousemove', 'keydown', 'click', 'touchstart', 'wheel'].forEach((ev) => document.addEventListener(ev, () => (last = Date.now()), { passive: true }));
     setInterval(() => {
-      if (Date.now() - last > 15 * 60 * 1000) lockNow();
+      if (store.backend.encrypted && !locking && Date.now() - last > 15 * 60 * 1000) {
+        last = Date.now();
+        lockNow();
+      }
     }, 30000);
   }
 
+  /** Bloqueia sem recarregar a página: grava, esconde tudo e pede a senha de novo. */
+  let locking = false;
   async function lockNow() {
+    if (locking) return;
+    locking = true;
     await store.flush();
-    g.location.reload();
+    $('#modal-root').innerHTML = '';
+    $('#view').innerHTML = '';
+    C.destroyAll();
+    const env = await rawBackend.load();
+    const session = P.vault.isEnvelope(env) ? await unlock(env) : null;
+    store.backend = session ? P.vault.wrap(rawBackend, session) : rawBackend;
+    await store.load();
+    locking = false;
+    render();
   }
 
   /** Na primeira vez com dados, sugere criar usuário e senha. */
@@ -217,7 +238,7 @@
     if (!protectable() || store.data.settings.securityDismissed || !store.data.assets.length) return;
     openModal({
       title: 'Proteja seus dados',
-      body: '<p>Crie um usuário e uma senha para abrir o Patrimônio. Os dados passam a ser gravados criptografados neste ' + (rawBackend.id === 'desktop' ? 'computador' : 'navegador') + ': sem a senha, ninguém consegue lê-los, nem abrindo o arquivo.</p>',
+      body: '<p>Crie um usuário e uma senha para abrir o Patrimônio. Os dados passam a ser gravados criptografados ' + placeName() + ': sem a senha, ninguém consegue lê-los, nem abrindo ' + (rawBackend.id === 'appsscript' ? 'a planilha' : 'o arquivo') + '.</p>',
       actions: [
         { label: 'Agora não', onClick: (close) => (store.setSetting('securityDismissed', true), close()) },
         { label: 'Criar usuário e senha', cls: 'primary', onClick: (close) => (close(), openProtectForm('create')) },
@@ -282,20 +303,24 @@
 
   function securityCard() {
     if (!rawBackend) return '';
+    const sheet = rawBackend.id === 'appsscript';
     let body;
-    if (rawBackend.id === 'appsscript') {
-      body = '<p class="muted">O acesso é protegido pela sua conta Google: com a implantação "Somente eu", só você entra no app e na planilha. Para mais segurança, ative a verificação em duas etapas na sua Conta Google.</p>';
-    } else if (!P.vault.available()) {
-      body = '<p class="muted">Este navegador não oferece criptografia. Use o app do Windows ou um navegador atualizado para proteger os dados com senha.</p>';
+    if (!P.vault.available()) {
+      body = '<p class="muted">Este navegador não oferece criptografia. Use um navegador atualizado para proteger os dados com senha.</p>';
     } else if (store.backend.encrypted) {
       body =
-        '<p><span class="pos" style="font-weight:600">Protegido com usuário e senha.</span> <span class="muted">Os dados' + (rawBackend.id === 'desktop' ? ' e os backups automáticos' : '') + ' são gravados criptografados (AES-256). O app bloqueia sozinho depois de 15 minutos sem uso.</span></p>' +
+        '<p><span class="pos" style="font-weight:600">Protegido com usuário e senha.</span> <span class="muted">' +
+        (sheet ? 'Os dados ficam criptografados (AES-256) na aba "Cofre" da planilha: nem abrindo a planilha dá para lê-los.' : 'Os dados' + (rawBackend.id === 'desktop' ? ' e os backups automáticos' : '') + ' são gravados criptografados (AES-256).') +
+        ' O app bloqueia sozinho depois de 15 minutos sem uso.</span></p>' +
         '<p class="faint">O backup exportado (.json) não é criptografado: guarde-o num lugar seguro.</p>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" data-action="lock-now">Bloquear agora</button><button class="btn" data-action="protect-change">Trocar usuário e senha</button><button class="btn danger" data-action="protect-remove">Remover proteção</button></div>';
     } else {
       body =
-        '<p class="muted">Hoje qualquer pessoa que use este ' + (rawBackend.id === 'desktop' ? 'computador' : 'navegador') + ' consegue abrir seus dados. Crie um usuário e uma senha: o app passa a pedir o acesso ao abrir e grava tudo criptografado.</p>' +
-        '<button class="btn primary" data-action="protect-create">Criar usuário e senha</button>';
+        '<p class="muted">' +
+        (sheet
+          ? 'Hoje o acesso depende só da sua conta Google: quem usar um aparelho com ela conectada abre o app e a planilha. Com usuário e senha, o app pede o acesso ao abrir e os dados passam a ficar criptografados numa aba única ("Cofre"). As abas atuais deixam de existir, então não será mais possível editar os dados direto na planilha.'
+          : 'Hoje qualquer pessoa que use este ' + (rawBackend.id === 'desktop' ? 'computador' : 'navegador') + ' consegue abrir seus dados. Crie um usuário e uma senha: o app passa a pedir o acesso ao abrir e grava tudo criptografado.') +
+        '</p><button class="btn primary" data-action="protect-create">Criar usuário e senha</button>';
     }
     return '<section class="card span-6"><h3 class="card-title">Segurança</h3>' + body + '</section>';
   }

@@ -32,6 +32,9 @@ var TABS = [
   },
 ];
 var CONFIG_TAB = 'Config';
+// Com usuário e senha, os dados ficam criptografados (pelo app, no navegador) nesta aba única.
+var VAULT_TAB = 'Cofre';
+var VAULT_CHUNK = 45000; // limite de 50 mil caracteres por célula
 
 function doGet() {
   return HtmlService.createTemplateFromFile('Index')
@@ -84,6 +87,13 @@ function fromISO_(s) {
 /** Lê todas as abas e devolve o JSON usado pela interface. */
 function getData() {
   var ss = getSpreadsheet_();
+  var vault = ss.getSheetByName(VAULT_TAB);
+  if (vault && vault.getLastRow() >= 1) {
+    // Cada célula começa com "x" para o Sheets não interpretar "=" ou "+" como fórmula.
+    var cipher = vault.getRange(1, 1, vault.getLastRow(), 1).getValues()
+      .map(function (r) { return String(r[0] || '').slice(1); }).join('');
+    if (cipher) return cipher;
+  }
   var tz = tz_(ss);
   var data = {};
   var hasAny = false;
@@ -118,6 +128,7 @@ function getData() {
       if (k === 'goal') data.settings.goal = Number(r[1]) || 0;
       if (k === 'hideValues') data.settings.hideValues = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
       if (k === 'cardItemized') data.settings.cardItemized = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
+      if (k === 'securityDismissed') data.settings.securityDismissed = r[1] === true || String(r[1]).toUpperCase() === 'TRUE';
       if (k === 'installmentRules') {
         try { data.settings.installmentRules = JSON.parse(r[1]); } catch (e) { data.settings.installmentRules = {}; }
       }
@@ -145,6 +156,11 @@ function saveData(json) {
   lock.waitLock(20000);
   try {
     var ss = getSpreadsheet_();
+    if (data && data.format === 'patrimonio-cifrado') {
+      saveVault_(ss, json);
+      return true;
+    }
+    var oldVault = ss.getSheetByName(VAULT_TAB);
     TABS.forEach(function (tab) {
       var sheet = ss.getSheetByName(tab.name) || ss.insertSheet(tab.name);
       var rows = (data[tab.key] || []).map(function (obj) {
@@ -173,7 +189,8 @@ function saveData(json) {
     var config = ss.getSheetByName(CONFIG_TAB) || ss.insertSheet(CONFIG_TAB);
     config.clearContents();
     var s = data.settings || {};
-    config.getRange(1, 1, 8, 2).setValues([
+    config.getRange(1, 1, 9, 2).setValues([
+      ['securityDismissed', s.securityDismissed === true],
       ['plan', JSON.stringify(s.plan || {})],
       ['installmentRules', JSON.stringify(s.installmentRules || {})],
       ['goal', Number(s.goal) || 0],
@@ -184,6 +201,8 @@ function saveData(json) {
       ['benchmarks', JSON.stringify(data.benchmarks || {})],
     ]);
 
+    if (oldVault) ss.deleteSheet(oldVault); // proteção removida: volta às abas legíveis
+
     // Remove a aba vazia padrão de uma planilha recém-criada.
     var def = ss.getSheetByName('Página1') || ss.getSheetByName('Sheet1');
     if (def && ss.getSheets().length > 1 && def.getLastRow() === 0) ss.deleteSheet(def);
@@ -191,6 +210,19 @@ function saveData(json) {
     lock.releaseLock();
   }
   return true;
+}
+
+/** Grava o conteúdo criptografado na aba Cofre e apaga as abas legíveis. */
+function saveVault_(ss, json) {
+  var sheet = ss.getSheetByName(VAULT_TAB) || ss.insertSheet(VAULT_TAB);
+  var rows = [];
+  for (var i = 0; i < json.length; i += VAULT_CHUNK) rows.push(['x' + json.substr(i, VAULT_CHUNK)]);
+  sheet.clearContents();
+  sheet.getRange(1, 1, rows.length, 1).setValues(rows);
+  TABS.map(function (t) { return t.name; }).concat([CONFIG_TAB, 'Página1', 'Sheet1']).forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (sh && ss.getSheets().length > 1) ss.deleteSheet(sh);
+  });
 }
 
 /** CDI (4391) e IPCA (433) da API do Banco Central — feito no servidor, sem problema de CORS. */

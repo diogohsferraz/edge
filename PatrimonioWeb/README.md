@@ -47,11 +47,12 @@ Para passar os dados de uma versão para outra, use **Ajustes › Exportar backu
     - **Compras parceladas:** a categoria escolhida para uma parcela vale para todas as parcelas da mesma compra, as já lançadas e as das próximas faturas.
     - **Sem duplicidade:** ao importar faturas, o pagamento da fatura ("Pagto cartão crédito" no extrato) deixa de ser despesa. A prévia oferece remover os pagamentos já lançados que batem com o valor da fatura, e os próximos extratos trazem essa linha desmarcada.
 - **Segurança (usuário e senha):**
-  - no Windows e no arquivo único, crie um usuário e uma senha em **Ajustes › Segurança**. O app passa a pedir o acesso ao abrir;
+  - em todas as versões (Windows, Apps Script e arquivo único), crie um usuário e uma senha em **Ajustes › Segurança**. O app passa a pedir o acesso ao abrir;
   - os dados (e, no Windows, os backups automáticos) são gravados criptografados com AES-256, com a chave derivada do usuário e da senha (PBKDF2, 600 mil iterações). Sem a senha, o arquivo é ilegível;
+  - no Apps Script, a planilha passa a ter uma única aba "Cofre" com o conteúdo criptografado (as abas legíveis são apagadas, e os dados deixam de ser editáveis direto na planilha). Removendo a proteção, as abas voltam;
   - o app bloqueia sozinho depois de 15 minutos sem uso, e há o botão "Bloquear agora";
   - **não há recuperação de senha**: guarde um backup exportado (.json) em lugar seguro;
-  - na versão Apps Script, quem protege o acesso é a sua conta Google (implantação "Somente eu").
+  - no Apps Script, isso se soma à proteção da conta Google (implantação "Somente eu").
 - **Ajustes:**
   - Importar a planilha do **Excel (.xlsx)** ou em **CSV**, no formato de colunas por mês ou de lançamentos.
   - **Planilha de evolução patrimonial** com um bloco por fechamento (data em cima; colunas Investimento, Banco e Valor; linha TOTAL):

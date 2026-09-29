@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const { loadGas } = require('./gas-mock');
 
 function loadCore() {
-  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON };
+  const ctx = { console, Intl, setTimeout, clearTimeout, Date, Math, Number, String, Object, Array, Set, JSON, TextEncoder, TextDecoder, crypto, btoa, atob };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   for (const f of ['util.js', 'model.js', 'analytics.js', 'csv.js', 'xlsx.js', 'blocks.js', 'planner.js', 'vault.js', 'statement.js', 'invoice.js', 'sample.js']) {
@@ -105,4 +105,38 @@ test('plano de aportes sobrevive à planilha', () => {
   const back = JSON.parse(ctx.getData());
   assert.equal(back.settings.plan.monthly, 1500);
   assert.equal(back.settings.plan.targets.acoes, 40);
+});
+
+test('dados protegidos ficam só na aba Cofre, criptografados', async () => {
+  const P = loadCore();
+  const { ctx, ss } = loadGas();
+  const backend = { id: 'appsscript', load: async () => { const j = ctx.getData(); return j ? JSON.parse(j) : null; }, save: async (d) => ctx.saveData(JSON.stringify(d)) };
+  const store = P.createStore(backend);
+  await store.load();
+  P.loadSampleData(store);
+  await store.flush();
+  assert.ok(ss.getSheetByName('Saldos'));
+
+  // Liga a proteção: some tudo que é legível e fica só o Cofre.
+  const session = await P.vault.createSession('diogo', 'segredo123');
+  store.backend = P.vault.wrap(backend, session);
+  store.commit();
+  await store.flush();
+  assert.deepEqual([...ss._sheets.map((s) => s.name)], ['Cofre']);
+  const cells = ss.getSheetByName('Cofre')._cells.map((r) => r[0]);
+  assert.ok(cells.every((c) => c.startsWith('x')));
+  assert.ok(!cells.join('').includes('Tesouro'));
+
+  // Lê de volta com a senha.
+  const env = JSON.parse(ctx.getData());
+  assert.ok(P.vault.isEnvelope(env));
+  const { data } = await P.vault.open(env, 'Diogo', 'segredo123');
+  assert.equal(data.assets.length, store.data.assets.length);
+
+  // Remove a proteção: voltam as abas legíveis e o Cofre é apagado.
+  store.backend = backend;
+  store.commit();
+  await store.flush();
+  assert.ok(ss.getSheetByName('Saldos') && !ss.getSheetByName('Cofre'));
+  assert.equal(JSON.parse(ctx.getData()).assets.length, data.assets.length);
 });
