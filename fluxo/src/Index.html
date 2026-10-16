@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Fluxo</title>
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div id="app"><div class="loading">Carregando…</div></div>
+  <div class="toasts" role="status" aria-live="polite"></div>
+  <script>
+    window.FLUXO_FORM_TOKEN = <?= formToken ?>;
+    window.FLUXO_APP_URL = <?= appUrl ?>;
+  </script>
+  <?!= include('App'); ?>
+</body>
+</html>

@@ -1,0 +1,1523 @@
+<script>
+/* ===================== Infraestrutura ===================== */
+var S = {
+  token: null, user: null, users: [], pipes: [], tables: [], appUrl: window.FLUXO_APP_URL || '',
+  bundle: null, records: {}, route: { name: 'home' },
+  filters: { q: '', phase: '', assignee: '', label: '', status: '' }
+};
+var FIELD_TYPE_NAMES = {
+  text: 'Texto curto', textarea: 'Texto longo', number: 'Número', currency: 'Moeda (R$)',
+  date: 'Data', datetime: 'Data e hora', email: 'E-mail', phone: 'Telefone',
+  select: 'Lista suspensa', radio: 'Seleção única', checklist: 'Checklist (várias opções)',
+  checkbox: 'Sim/Não', user: 'Responsável (usuário)', attachment: 'Anexo', connection: 'Conexão com database'
+};
+var LABEL_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+
+function store(k, v) {
+  try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
+  catch (e) { return null; }
+}
+
+function gcall(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (resolve, reject) {
+    var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) {
+      reject(new Error(e && e.message ? e.message : String(e)));
+    });
+    r[fn].apply(r, args);
+  });
+}
+function api(method, args) {
+  return gcall('api', S.token, method, args || {}).then(function (r) {
+    if (!r.ok) {
+      if (r.error === 'SESSION_EXPIRED') { store('fluxo_token', null); S.token = null; renderAuth(); throw new Error('Sua sessão expirou. Entre novamente.'); }
+      throw new Error(r.error);
+    }
+    return r.data;
+  });
+}
+function papi(method, args) {
+  return gcall('publicApi', method, args || {}).then(function (r) { if (!r.ok) throw new Error(r.error); return r.data; });
+}
+
+function h(tag, attrs) {
+  var el = document.createElement(tag);
+  attrs = attrs || {};
+  Object.keys(attrs).forEach(function (k) {
+    var v = attrs[k];
+    if (v === undefined || v === null || v === false) return;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.indexOf('on') === 0 && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (k === 'value') el.value = v;
+    else if (k === 'checked') el.checked = !!v;
+    else if (k === 'text') el.textContent = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  });
+  for (var i = 2; i < arguments.length; i++) append(el, arguments[i]);
+  return el;
+}
+function append(el, c) {
+  if (c === null || c === undefined || c === false) return;
+  if (Array.isArray(c)) { c.forEach(function (x) { append(el, x); }); return; }
+  el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+}
+function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+function $(sel) { return document.querySelector(sel); }
+
+function toast(msg, isErr) {
+  var box = $('.toasts') || document.body.appendChild(h('div', { class: 'toasts', role: 'status' }));
+  var t = h('div', { class: 'toast' + (isErr ? ' err' : '') }, msg);
+  box.appendChild(t);
+  setTimeout(function () { t.remove(); }, isErr ? 6000 : 3000);
+}
+function fail(e) { toast(e && e.message ? e.message : String(e), true); }
+
+function busy(btn, promise) {
+  if (btn) btn.disabled = true;
+  return promise.finally(function () { if (btn) btn.disabled = false; });
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  var s = String(iso);
+  var d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T12:00:00') : new Date(s);
+  return isNaN(d) ? s : d.toLocaleDateString('pt-BR');
+}
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  return isNaN(d) ? String(iso) : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+function fmtMoney(v) {
+  if (v === '' || v === null || v === undefined || isNaN(Number(v))) return '';
+  return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+function fmtDuration(hours) {
+  if (hours < 1) return Math.max(1, Math.round(hours * 60)) + ' min';
+  if (hours < 48) return Math.round(hours) + ' h';
+  return (hours / 24).toFixed(1).replace('.', ',') + ' dias';
+}
+function initials(name) {
+  return String(name || '?').split(/\s+/).filter(String).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase();
+}
+function userName(id) {
+  if (id === 'automation') return 'Automação';
+  if (id === 'public') return 'Formulário público';
+  var u = S.users.filter(function (x) { return x.id === id; })[0];
+  return u ? u.name : 'Usuário removido';
+}
+function isEmpty(v) { return v === undefined || v === null || v === '' || v === false || (Array.isArray(v) && !v.length); }
+function isAdmin() { return S.user && S.user.role === 'admin'; }
+
+function downloadBlob(name, mime, content) {
+  var blob = content instanceof Blob ? content : new Blob([content], { type: mime });
+  var a = h('a', { href: URL.createObjectURL(blob), download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+}
+function toCsv(rows) {
+  return '﻿' + rows.map(function (r) {
+    return r.map(function (c) {
+      var s = c === null || c === undefined ? '' : String(c);
+      if (/^[=+\-@]/.test(s)) s = "'" + s;
+      return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(';');
+  }).join('\r\n');
+}
+
+/* ---------- Tooltip ---------- */
+var tipEl = null;
+function tip(el, text) {
+  el.addEventListener('mousemove', function (e) {
+    if (!tipEl) tipEl = document.body.appendChild(h('div', { class: 'tooltip' }));
+    tipEl.textContent = text;
+    tipEl.style.display = 'block';
+    var x = Math.min(e.clientX + 12, window.innerWidth - tipEl.offsetWidth - 8);
+    tipEl.style.left = x + 'px'; tipEl.style.top = (e.clientY + 14) + 'px';
+  });
+  el.addEventListener('mouseleave', function () { if (tipEl) tipEl.style.display = 'none'; });
+}
+
+/* ---------- Modal ---------- */
+function modal(title, body, opts) {
+  opts = opts || {};
+  var overlay = h('div', { class: 'overlay' });
+  function close() { overlay.remove(); document.removeEventListener('keydown', onKey); if (opts.onClose) opts.onClose(); }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  var foot = opts.actions ? h('div', { class: 'modal-foot' }, opts.actions(close)) : null;
+  var m = h('div', { class: 'modal' + (opts.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+    h('div', { class: 'modal-head' }, h('h2', { class: 'spacer' }, title),
+      h('button', { class: 'btn ghost icon', 'aria-label': 'Fechar', onclick: close }, '✕')),
+    h('div', { class: 'modal-body' }, body), foot);
+  overlay.appendChild(m);
+  overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+  var first = m.querySelector('input, select, textarea');
+  if (first && !opts.noFocus) first.focus();
+  return close;
+}
+function confirmBox(text, okText) {
+  return new Promise(function (resolve) {
+    var done = false;
+    modal('Confirmar', h('p', {}, text), {
+      noFocus: true,
+      onClose: function () { if (!done) resolve(false); },
+      actions: function (close) {
+        return [h('button', { class: 'btn', onclick: close }, 'Cancelar'),
+          h('button', { class: 'btn primary', onclick: function () { done = true; close(); resolve(true); } }, okText || 'Confirmar')];
+      }
+    });
+  });
+}
+
+/* ===================== Roteamento ===================== */
+function parseHash(hash) {
+  var p = String(hash || '').replace(/^#\/?/, '').split('/').filter(String);
+  if (p[0] === 'pipe' && p[1]) return { name: 'pipe', id: p[1], tab: p[2] || 'kanban' };
+  if (p[0] === 'card' && p[1]) return { name: 'card', id: p[1] };
+  if (p[0] === 'databases') return { name: 'tables' };
+  if (p[0] === 'database' && p[1]) return { name: 'table', id: p[1] };
+  if (p[0] === 'admin') return { name: 'admin' };
+  if (p[0] === 'conta') return { name: 'account' };
+  return { name: 'home' };
+}
+function go(hash) {
+  try { google.script.history.push(null, null, hash.replace(/^#/, '')); } catch (e) { /* fora do Apps Script */ }
+  S.route = parseHash(hash);
+  render();
+}
+
+/* ===================== Autenticação ===================== */
+function renderAuth() {
+  var root = clear($('#app'));
+  root.appendChild(h('div', { class: 'loading' }, 'Carregando…'));
+  papi('status').then(function (st) {
+    var signup = !st.hasUsers;
+    var err = h('div', { class: 'error-text', role: 'alert' });
+    var name = h('input', { type: 'text', autocomplete: 'name' });
+    var email = h('input', { type: 'email', autocomplete: 'email' });
+    var pass = h('input', { type: 'password', autocomplete: signup ? 'new-password' : 'current-password' });
+    var btn = h('button', { class: 'btn primary', type: 'submit' }, signup ? 'Criar conta' : 'Entrar');
+    var form = h('form', { class: 'panel' },
+      h('div', { class: 'brand' }, h('div', { class: 'brand-mark' }, 'F'), 'Fluxo'),
+      h('div', {}, h('h1', {}, signup ? 'Criar conta de administrador' : 'Entrar'),
+        h('p', { class: 'muted small' }, signup ? 'Este é o primeiro acesso. A conta criada agora administra o sistema.' : 'Use o e-mail e a senha cadastrados.')),
+      signup ? h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nome'), name) : null,
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'E-mail'), email),
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Senha'), pass,
+        signup ? h('span', { class: 'help' }, 'Mínimo de 8 caracteres.') : null),
+      err, btn);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault(); err.textContent = '';
+      var p = signup ? papi('register', { email: email.value, name: name.value, password: pass.value })
+        : papi('login', { email: email.value, password: pass.value });
+      busy(btn, p.then(function (r) {
+        S.token = r.token; store('fluxo_token', r.token); start();
+      }).catch(function (e2) { err.textContent = e2.message; }));
+    });
+    clear(root).appendChild(h('div', { class: 'auth' }, form));
+    (signup ? name : email).focus();
+  }).catch(fail);
+}
+
+function logout() {
+  api('auth.logout').catch(function () {});
+  store('fluxo_token', null); S.token = null; S.user = null; renderAuth();
+}
+
+/* ===================== Shell ===================== */
+function loadBootstrap() {
+  return api('bootstrap').then(function (b) {
+    S.user = b.user; S.users = b.users; S.pipes = b.pipes; S.tables = b.tables; S.appUrl = b.appUrl || S.appUrl;
+  });
+}
+
+function shell(content, active) {
+  var root = clear($('#app'));
+  var nav = h('nav', { class: 'nav', 'aria-label': 'Principal' },
+    navLink('#/', 'Pipes', active === 'home' || active === 'pipe'),
+    navLink('#/databases', 'Databases', active === 'tables' || active === 'table'),
+    isAdmin() ? navLink('#/admin', 'Administração', active === 'admin') : null);
+  root.appendChild(h('header', { class: 'topbar' },
+    h('div', { class: 'brand', onclick: function () { go('#/'); } }, h('div', { class: 'brand-mark' }, 'F'), 'Fluxo'),
+    nav, h('div', { class: 'spacer' }),
+    h('a', { class: 'btn ghost', href: '#/conta', onclick: link('#/conta'), title: S.user.email },
+      h('span', { class: 'avatar', style: 'margin:0' }, initials(S.user.name)), h('span', { class: 'small' }, S.user.name)),
+    h('button', { class: 'btn ghost', onclick: logout }, 'Sair')));
+  root.appendChild(h('main', { class: 'page' }, content));
+}
+function link(hash) { return function (e) { e.preventDefault(); go(hash); }; }
+function navLink(hash, text, active) { return h('a', { href: hash, class: active ? 'active' : '', onclick: link(hash) }, text); }
+
+function render() {
+  if (!S.token) return renderAuth();
+  var r = S.route;
+  if (r.name === 'pipe') return renderPipe(r.id, r.tab);
+  if (r.name === 'card') return openCardRoute(r.id);
+  if (r.name === 'tables') return renderTables();
+  if (r.name === 'table') return renderTable(r.id);
+  if (r.name === 'admin') return renderAdmin();
+  if (r.name === 'account') return renderAccount();
+  return renderHome();
+}
+
+function start() {
+  clear($('#app')).appendChild(h('div', { class: 'loading' }, 'Carregando…'));
+  loadBootstrap().then(function () {
+    try {
+      google.script.url.getLocation(function (loc) { S.route = parseHash(loc.hash); render(); });
+    } catch (e) { S.route = parseHash(location.hash); render(); }
+  }).catch(function (e) { if (S.token) fail(e); });
+}
+
+/* ===================== Página inicial ===================== */
+function renderHome() {
+  loadBootstrap().then(function () {
+    var head = h('div', { class: 'page-head' }, h('h1', { class: 'spacer' }, 'Pipes'),
+      isAdmin() ? h('button', { class: 'btn primary', onclick: newPipeDialog }, '+ Novo pipe') : null);
+    var body;
+    if (!S.pipes.length) {
+      body = h('div', { class: 'panel empty' },
+        h('p', {}, 'Nenhum pipe por aqui ainda.'),
+        isAdmin() ? h('div', { class: 'row', style: 'justify-content:center' },
+          h('button', { class: 'btn primary', onclick: newPipeDialog }, 'Criar um pipe'),
+          h('button', { class: 'btn', onclick: function (e) { seedDemo(e.currentTarget); } }, 'Carregar dados de exemplo')) :
+          h('p', {}, 'Peça a um administrador para adicionar você a um pipe.'));
+    } else {
+      body = h('div', { class: 'grid' }, S.pipes.map(function (s) {
+        return h('div', { class: 'panel pipe-tile', tabindex: '0', role: 'link',
+          onclick: function () { go('#/pipe/' + s.pipe.id); },
+          onkeydown: function (e) { if (e.key === 'Enter') go('#/pipe/' + s.pipe.id); } },
+          h('div', { class: 'row' }, h('span', { class: 'pipe-dot', style: 'background:' + s.pipe.color }), h('h3', {}, s.pipe.name)),
+          s.pipe.description ? h('div', { class: 'muted small' }, s.pipe.description) : null,
+          h('div', { class: 'stat-row' },
+            h('div', {}, h('b', {}, s.open), h('span', { class: 'muted small' }, 'abertos')),
+            h('div', {}, h('b', {}, s.total), h('span', { class: 'muted small' }, 'no total')),
+            h('div', {}, h('b', { style: s.late ? 'color:var(--danger)' : '' }, s.late), h('span', { class: 'muted small' }, 'atrasados'))));
+      }));
+    }
+    shell([head, body], 'home');
+  }).catch(fail);
+}
+
+function seedDemo(btn) {
+  busy(btn, api('demo.seed').then(function () { toast('Dados de exemplo criados.'); go('#/'); })).catch(fail);
+}
+
+function newPipeDialog() {
+  var name = h('input', { type: 'text', placeholder: 'Ex.: Solicitações de compra' });
+  var tpl = h('select', {},
+    h('option', { value: 'blank' }, 'Em branco'),
+    h('option', { value: 'compras' }, 'Modelo: Solicitações de compra'),
+    h('option', { value: 'reembolso' }, 'Modelo: Reembolsos'));
+  modal('Novo pipe', [
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nome'), name),
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Começar com'), tpl)
+  ], {
+    actions: function (close) {
+      var b = h('button', { class: 'btn primary', onclick: function () {
+        busy(b, api('pipes.createFromTemplate', { template: tpl.value, name: name.value }).then(function (r) {
+          close(); go('#/pipe/' + r.pipe.id + '/config');
+        })).catch(fail);
+      } }, 'Criar');
+      return [h('button', { class: 'btn', onclick: close }, 'Cancelar'), b];
+    }
+  });
+}
+
+/* ===================== Campos (render e edição) ===================== */
+function phaseById(id) { return S.bundle ? S.bundle.phases.filter(function (p) { return p.id === id; })[0] : null; }
+function pipeFields(bundle) {
+  var f = (bundle.pipe.startFields || []).slice();
+  bundle.phases.forEach(function (p) { f = f.concat(p.fields || []); });
+  return f;
+}
+function loadRecords(tableId) {
+  if (S.records[tableId]) return Promise.resolve(S.records[tableId]);
+  return api('records.list', { tableId: tableId }).then(function (r) { S.records[tableId] = r; return r; });
+}
+function recordLabel(tableId, rec) {
+  var t = S.tables.filter(function (x) { return x.id === tableId; })[0];
+  var v = t && rec && rec.values ? rec.values[t.titleFieldId] : '';
+  return v ? String(v) : (rec ? 'Registro ' + rec.id.slice(-4) : '');
+}
+
+function formatValue(f, v, records) {
+  if (isEmpty(v)) return '';
+  switch (f.type) {
+    case 'currency': return fmtMoney(v);
+    case 'date': return fmtDate(v);
+    case 'datetime': return fmtDateTime(v);
+    case 'checkbox': return v ? 'Sim' : 'Não';
+    case 'user': return [].concat(v).map(userName).join(', ');
+    case 'attachment': return [].concat(v).map(function (x) { return x.name; }).join(', ');
+    case 'connection': return [].concat(v).map(function (id) {
+      var list = (records && records[id]) ? [records[id]] : (S.records[f.tableId] || []).filter(function (r) { return r.id === id; });
+      return list[0] ? recordLabel(f.tableId, list[0]) : '(registro)';
+    }).join(', ');
+    default: return Array.isArray(v) ? v.join(', ') : String(v);
+  }
+}
+
+/** Monta um formulário. `opts.upload(file)` envia anexos. Retorna {el, values, validate}. */
+function buildForm(fields, initial, opts) {
+  opts = opts || {};
+  var values = JSON.parse(JSON.stringify(initial || {}));
+  var errors = {};
+  var el = h('div', { class: 'stack' });
+  fields.forEach(function (f) {
+    var err = h('div', { class: 'error-text' });
+    errors[f.id] = err;
+    var input = fieldInput(f, values[f.id], function (v) { values[f.id] = v; err.textContent = ''; if (opts.onChange) opts.onChange(f, v); }, opts);
+    var group = ['radio', 'checklist', 'user', 'attachment', 'checkbox'].indexOf(f.type) >= 0;
+    el.appendChild(h(group ? 'div' : 'label', { class: 'field', role: group ? 'group' : null, 'aria-label': group ? f.label : null },
+      h('span', { class: 'lbl' }, f.label, f.required ? h('span', { class: 'req', 'aria-label': 'obrigatório' }, '*') : null),
+      input, f.help ? h('span', { class: 'help' }, f.help) : null, err));
+  });
+  if (!fields.length) el.appendChild(h('div', { class: 'muted small' }, 'Nenhum campo nesta etapa.'));
+  return {
+    el: el, values: values,
+    validate: function () {
+      var ok = true;
+      fields.forEach(function (f) {
+        if (f.required && isEmpty(values[f.id])) { errors[f.id].textContent = 'Campo obrigatório.'; ok = false; }
+        else if (f.type === 'email' && values[f.id] && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(values[f.id])) { errors[f.id].textContent = 'E-mail inválido.'; ok = false; }
+      });
+      return ok;
+    }
+  };
+}
+
+function fieldInput(f, value, onChange, opts) {
+  function inp(type, extra) {
+    var e = h('input', Object.assign({ type: type, value: value === undefined || value === null ? '' : value }, extra || {}));
+    e.addEventListener('input', function () {
+      onChange(type === 'number' ? (e.value === '' ? '' : Number(e.value)) : e.value);
+    });
+    return e;
+  }
+  switch (f.type) {
+    case 'textarea': {
+      var t = h('textarea', { value: value || '' });
+      t.addEventListener('input', function () { onChange(t.value); });
+      return t;
+    }
+    case 'number': return inp('number', { step: 'any' });
+    case 'currency': return inp('number', { step: '0.01', min: '0', placeholder: '0,00' });
+    case 'date': return inp('date');
+    case 'datetime': return inp('datetime-local');
+    case 'email': return inp('email');
+    case 'phone': return inp('tel');
+    case 'select': {
+      var s = h('select', {}, h('option', { value: '' }, 'Selecione…'),
+        (f.options || []).map(function (o) { return h('option', { value: o }, o); }));
+      s.value = value || '';
+      s.addEventListener('change', function () { onChange(s.value); });
+      return s;
+    }
+    case 'radio': {
+      var name = 'r_' + f.id + '_' + Math.random().toString(36).slice(2, 7);
+      return h('div', { class: 'choices' }, (f.options || []).map(function (o) {
+        return h('label', { class: 'choice' }, h('input', { type: 'radio', name: name, value: o, checked: value === o,
+          onchange: function () { onChange(o); } }), o);
+      }));
+    }
+    case 'checklist': {
+      var set = [].concat(value || []);
+      return h('div', { class: 'choices' }, (f.options || []).map(function (o) {
+        return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: set.indexOf(o) >= 0,
+          onchange: function (e) {
+            if (e.target.checked) { if (set.indexOf(o) < 0) set.push(o); } else set.splice(set.indexOf(o), 1);
+            onChange(set.slice());
+          } }), o);
+      }));
+    }
+    case 'checkbox':
+      return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: !!value,
+        onchange: function (e) { onChange(e.target.checked); } }), 'Sim');
+    case 'user': {
+      var us = [].concat(value || []);
+      return h('div', { class: 'choices' }, S.users.filter(function (u) { return u.active; }).map(function (u) {
+        return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: us.indexOf(u.id) >= 0,
+          onchange: function (e) {
+            if (e.target.checked) us.push(u.id); else us.splice(us.indexOf(u.id), 1);
+            onChange(us.slice());
+          } }), u.name);
+      }));
+    }
+    case 'attachment': return attachmentInput(value, onChange, opts);
+    case 'connection': {
+      var sel = h('select', {}, h('option', { value: '' }, f.tableId ? 'Carregando…' : 'Database não configurada'));
+      var cur = [].concat(value || [])[0] || '';
+      if (f.tableId) {
+        loadRecords(f.tableId).then(function (recs) {
+          clear(sel).appendChild(h('option', { value: '' }, 'Selecione um registro…'));
+          recs.forEach(function (r) { sel.appendChild(h('option', { value: r.id }, recordLabel(f.tableId, r))); });
+          sel.value = cur;
+        }).catch(fail);
+      }
+      sel.addEventListener('change', function () { onChange(sel.value ? [sel.value] : []); });
+      return sel;
+    }
+    default: return inp('text');
+  }
+}
+
+function readFileBase64(file) {
+  return new Promise(function (resolve, reject) {
+    var r = new FileReader();
+    r.onload = function () { resolve(String(r.result).split(',')[1]); };
+    r.onerror = function () { reject(new Error('Não foi possível ler o arquivo.')); };
+    r.readAsDataURL(file);
+  });
+}
+function attachmentInput(value, onChange, opts) {
+  var files = [].concat(value || []);
+  var list = h('div', { class: 'files' });
+  var status = h('span', { class: 'help' });
+  function draw() {
+    clear(list);
+    files.forEach(function (f, i) {
+      list.appendChild(h('div', { class: 'file' }, '📎',
+        opts.publicForm ? h('span', { class: 'spacer' }, f.name) : h('a', { onclick: function () { downloadAttachment(f); } }, f.name),
+        h('button', { class: 'btn ghost sm', type: 'button', 'aria-label': 'Remover ' + f.name, onclick: function () {
+          files.splice(i, 1); onChange(files.slice()); draw();
+        } }, '✕')));
+    });
+  }
+  var picker = h('input', { type: 'file', multiple: true, class: 'hidden' });
+  picker.addEventListener('change', function () {
+    var chosen = Array.prototype.slice.call(picker.files);
+    picker.value = '';
+    chosen.reduce(function (p, file) {
+      return p.then(function () {
+        if (file.size > 10 * 1024 * 1024) throw new Error(file.name + ' tem mais de 10 MB.');
+        status.textContent = 'Enviando ' + file.name + '…';
+        return readFileBase64(file).then(function (data) { return opts.upload(file, data); }).then(function (meta) {
+          files.push(meta); onChange(files.slice()); draw();
+        });
+      });
+    }, Promise.resolve()).then(function () { status.textContent = ''; }).catch(function (e) { status.textContent = ''; fail(e); });
+  });
+  draw();
+  return h('div', { class: 'stack', style: 'gap:6px' }, list,
+    h('div', { class: 'row' }, h('button', { class: 'btn sm', type: 'button', onclick: function () { picker.click(); } }, 'Anexar arquivo'), status), picker);
+}
+function uploadViaApi(file, data) { return api('files.upload', { name: file.name, mimeType: file.type, data: data }); }
+function downloadAttachment(f) {
+  toast('Baixando ' + f.name + '…');
+  api('files.download', { id: f.id }).then(function (r) {
+    var bin = atob(r.data); var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    downloadBlob(r.name, r.mimeType, new Blob([bytes], { type: r.mimeType }));
+  }).catch(fail);
+}
+
+/* ===================== Pipe ===================== */
+function loadPipe(id) {
+  return api('pipes.get', { id: id }).then(function (b) { S.bundle = b; return b; });
+}
+
+function lateness(card) {
+  var phase = phaseById(card.phaseId);
+  var out = { late: false, expiring: false, overdue: false, hours: 0 };
+  if (card.phaseEnteredAt) out.hours = (Date.now() - new Date(card.phaseEnteredAt).getTime()) / 3600000;
+  if (!phase || phase.isDone === true || phase.isDone === 'TRUE' || phase.isDone === 'true') return out;
+  var sla = Number(phase.slaHours);
+  if (sla > 0) { out.late = out.hours > sla; out.expiring = !out.late && out.hours > sla * 0.75; }
+  if (card.dueDate && new Date(card.dueDate + (String(card.dueDate).length === 10 ? 'T23:59:59' : '')).getTime() < Date.now()) { out.overdue = true; out.late = true; }
+  return out;
+}
+function isDonePhase(p) { return p && (p.isDone === true || p.isDone === 'TRUE' || p.isDone === 'true'); }
+
+function statusBadge(card) {
+  var st = lateness(card);
+  if (st.overdue) return h('span', { class: 'badge late' }, '⚠ Vencido');
+  if (st.late) return h('span', { class: 'badge late' }, '⚠ Atrasado');
+  if (st.expiring) return h('span', { class: 'badge expiring' }, '⏱ Expirando');
+  return null;
+}
+
+function filteredCards() {
+  var f = S.filters;
+  var q = f.q.trim().toLowerCase();
+  return S.bundle.cards.filter(function (c) {
+    if (f.phase && c.phaseId !== f.phase) return false;
+    if (f.assignee && (c.assignees || []).indexOf(f.assignee) < 0) return false;
+    if (f.label && (c.labels || []).indexOf(f.label) < 0) return false;
+    if (f.status === 'late' && !lateness(c).late) return false;
+    if (f.status === 'expiring' && !lateness(c).expiring) return false;
+    if (f.status === 'open' && isDonePhase(phaseById(c.phaseId))) return false;
+    if (q) {
+      var hay = (c.title + ' ' + Object.keys(c.values || {}).map(function (k) {
+        var v = c.values[k]; return typeof v === 'object' ? JSON.stringify(v) : v;
+      }).join(' ')).toLowerCase();
+      if (hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function filterBar(onChange, withPhase) {
+  var b = S.bundle;
+  function sel(key, first, opts) {
+    var s = h('select', { 'aria-label': first }, h('option', { value: '' }, first), opts);
+    s.value = S.filters[key];
+    s.addEventListener('change', function () { S.filters[key] = s.value; onChange(); });
+    return s;
+  }
+  var q = h('input', { type: 'search', placeholder: 'Buscar cards…', value: S.filters.q, 'aria-label': 'Buscar cards' });
+  q.addEventListener('input', function () { S.filters.q = q.value; onChange(); });
+  return h('div', { class: 'filters' }, q,
+    withPhase ? sel('phase', 'Todas as fases', b.phases.map(function (p) { return h('option', { value: p.id }, p.name); })) : null,
+    sel('assignee', 'Todos os responsáveis', S.users.map(function (u) { return h('option', { value: u.id }, u.name); })),
+    (b.pipe.labels || []).length ? sel('label', 'Todas as etiquetas', b.pipe.labels.map(function (l) { return h('option', { value: l.id }, l.name); })) : null,
+    sel('status', 'Qualquer prazo', [h('option', { value: 'open' }, 'Somente abertos'), h('option', { value: 'late' }, 'Atrasados'), h('option', { value: 'expiring' }, 'Expirando')]));
+}
+
+function renderPipe(id, tab) {
+  if (!S.bundle || S.bundle.pipe.id !== id) {
+    S.filters = { q: '', phase: '', assignee: '', label: '', status: '' };
+    shell(h('div', { class: 'loading' }, 'Carregando pipe…'), 'pipe');
+  }
+  loadPipe(id).then(function (b) {
+    var p = b.pipe;
+    var tabs = [['kanban', 'Kanban'], ['lista', 'Lista'], ['relatorios', 'Relatórios'], ['automacoes', 'Automações']];
+    if (isAdmin()) tabs.push(['config', 'Configurar']);
+    var content = h('div', {});
+    shell([
+      h('div', { class: 'page-head' },
+        h('span', { class: 'pipe-dot', style: 'background:' + p.color + ';width:16px;height:16px' }),
+        h('div', { class: 'spacer' }, h('h1', {}, p.name), p.description ? h('div', { class: 'muted small' }, p.description) : null),
+        h('button', { class: 'btn primary', onclick: function () { newCardDialog(); } }, '+ Novo card')),
+      h('nav', { class: 'tabs', 'aria-label': 'Seções do pipe' }, tabs.map(function (t) {
+        var hash = '#/pipe/' + id + '/' + t[0];
+        return h('a', { href: hash, class: tab === t[0] ? 'active' : '', onclick: link(hash) }, t[1]);
+      })),
+      content
+    ], 'pipe');
+    if (tab === 'lista') renderList(content);
+    else if (tab === 'relatorios') renderReports(content);
+    else if (tab === 'automacoes') renderAutomations(content);
+    else if (tab === 'config' && isAdmin()) renderConfig(content);
+    else renderKanban(content);
+  }).catch(function (e) { fail(e); go('#/'); });
+}
+
+/* ---------- Kanban ---------- */
+function renderKanban(container) {
+  var board = h('div', { class: 'board' });
+  function draw() {
+    clear(board);
+    var cards = filteredCards();
+    S.bundle.phases.forEach(function (ph) {
+      var inPhase = cards.filter(function (c) { return c.phaseId === ph.id; })
+        .sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+      var body = h('div', { class: 'column-body' }, inPhase.map(kanbanCard));
+      if (!inPhase.length) body.appendChild(h('div', { class: 'muted small', style: 'text-align:center;padding:12px' }, 'Arraste cards para cá'));
+      var col = h('section', { class: 'column', 'aria-label': ph.name },
+        h('div', { class: 'column-head' }, h('h3', { class: 'spacer' }, ph.name),
+          Number(ph.slaHours) > 0 ? h('span', { class: 'muted small', title: 'Tempo máximo nesta fase' }, 'SLA ' + fmtDuration(Number(ph.slaHours))) : null,
+          isDonePhase(ph) ? h('span', { class: 'badge ok' }, '✓ Final') : null,
+          h('span', { class: 'count' }, inPhase.length)),
+        body);
+      col.addEventListener('dragover', function (e) { e.preventDefault(); col.classList.add('drop'); });
+      col.addEventListener('dragleave', function (e) { if (!col.contains(e.relatedTarget)) col.classList.remove('drop'); });
+      col.addEventListener('drop', function (e) {
+        e.preventDefault(); col.classList.remove('drop');
+        var cid = e.dataTransfer.getData('text/plain');
+        var card = S.bundle.cards.filter(function (c) { return c.id === cid; })[0];
+        if (!card || card.phaseId === ph.id) return;
+        var prev = card.phaseId;
+        card.phaseId = ph.id; draw();
+        api('cards.move', { id: cid, phaseId: ph.id }).then(function () { return loadPipe(S.bundle.pipe.id); }).then(draw)
+          .catch(function (err) { card.phaseId = prev; draw(); fail(err); });
+      });
+      board.appendChild(col);
+    });
+  }
+  container.appendChild(filterBar(draw, false));
+  container.appendChild(board);
+  draw();
+}
+
+function kanbanCard(c) {
+  var labels = (S.bundle.pipe.labels || []).filter(function (l) { return (c.labels || []).indexOf(l.id) >= 0; });
+  var el = h('article', { class: 'kcard', draggable: 'true', tabindex: '0', 'aria-label': c.title,
+    onclick: function () { openCard(c.id); },
+    onkeydown: function (e) { if (e.key === 'Enter') openCard(c.id); } },
+    labels.length ? h('div', { class: 'row', style: 'gap:4px' }, labels.map(function (l) { return h('span', { class: 'chip', style: 'background:' + l.color }, l.name); })) : null,
+    h('div', { class: 'title' }, c.title),
+    h('div', { class: 'meta' },
+      statusBadge(c),
+      c.dueDate ? h('span', { title: 'Vencimento' }, '📅 ' + fmtDate(c.dueDate)) : null,
+      h('span', { title: 'Tempo na fase atual' }, '⏱ ' + fmtDuration(lateness(c).hours)),
+      h('span', { class: 'spacer' }),
+      h('span', { class: 'avatars' }, (c.assignees || []).slice(0, 3).map(function (u) {
+        return h('span', { class: 'avatar', title: userName(u) }, initials(userName(u)));
+      }))));
+  el.addEventListener('dragstart', function (e) { e.dataTransfer.setData('text/plain', c.id); el.classList.add('dragging'); });
+  el.addEventListener('dragend', function () { el.classList.remove('dragging'); });
+  return el;
+}
+
+function refreshCurrentView() {
+  if (S.route.name === 'pipe') renderPipe(S.route.id, S.route.tab);
+}
+
+function newCardDialog() {
+  var b = S.bundle;
+  var form = buildForm(b.pipe.startFields || [], {}, { upload: uploadViaApi });
+  modal('Novo card — ' + b.pipe.name, [h('div', { class: 'muted small' }, 'Formulário inicial'), form.el], {
+    actions: function (close) {
+      var btn = h('button', { class: 'btn primary', onclick: function () {
+        if (!form.validate()) return;
+        busy(btn, api('cards.create', { pipeId: b.pipe.id, values: form.values }).then(function () {
+          close(); toast('Card criado.'); refreshCurrentView();
+        })).catch(fail);
+      } }, 'Criar card');
+      return [h('button', { class: 'btn', onclick: close }, 'Cancelar'), btn];
+    }
+  });
+}
+
+/* ---------- Detalhe do card ---------- */
+function openCardRoute(cardId) {
+  shell(h('div', { class: 'loading' }, 'Abrindo card…'), 'pipe');
+  api('cards.get', { id: cardId }).then(function (d) {
+    S.route = { name: 'pipe', id: d.card.pipeId, tab: 'kanban' };
+    renderPipe(d.card.pipeId, 'kanban');
+    var wait = setInterval(function () {
+      if (S.bundle && S.bundle.pipe.id === d.card.pipeId) { clearInterval(wait); openCard(cardId); }
+    }, 150);
+    setTimeout(function () { clearInterval(wait); }, 15000);
+  }).catch(function (e) { fail(e); go('#/'); });
+}
+
+function openCard(cardId) {
+  var body = h('div', {}, h('div', { class: 'loading' }, 'Carregando…'));
+  var changed = false;
+  var close = modal('Card', body, { wide: true, noFocus: true, onClose: function () { if (changed) refreshCurrentView(); } });
+  function load() {
+    return api('cards.get', { id: cardId }).then(function (d) { drawCard(d); }).catch(function (e) { fail(e); close(); });
+  }
+  function drawCard(d) {
+    var b = S.bundle, c = d.card;
+    var current = phaseById(c.phaseId);
+    var visited = (c.history || []).map(function (x) { return x.phaseId; });
+    var forms = [];
+    var dirty = false;
+    var saveBtn = h('button', { class: 'btn primary', disabled: true }, 'Salvar alterações');
+    function markDirty() { dirty = true; saveBtn.disabled = false; }
+
+    var title = h('input', { type: 'text', value: c.title, 'aria-label': 'Título do card', style: 'font-size:18px;font-weight:700' });
+    title.addEventListener('input', markDirty);
+
+    var left = h('div', { class: 'stack' }, title,
+      h('div', { class: 'row small muted' }, 'Fase atual:', h('b', {}, current ? current.name : '—'), statusBadge(c),
+        h('span', {}, '· criado ' + fmtDateTime(c.createdAt) + ' por ' + userName(c.createdBy))));
+
+    function section(name, fields, isCurrent) {
+      var form = buildForm(fields, c.values, { upload: uploadViaApi, onChange: markDirty });
+      forms.push(form);
+      left.appendChild(h('div', { class: 'section' + (isCurrent ? ' current' : '') },
+        h('div', { class: 'section-title' }, name, isCurrent ? h('span', { class: 'badge ok' }, 'Fase atual') : null), form.el));
+    }
+    section('Formulário inicial', b.pipe.startFields || [], false);
+    b.phases.forEach(function (ph) {
+      var isCur = ph.id === c.phaseId;
+      if ((isCur || visited.indexOf(ph.id) >= 0) && ((ph.fields || []).length || isCur)) section(ph.name, ph.fields || [], isCur);
+    });
+
+    saveBtn.addEventListener('click', function () {
+      var values = {};
+      forms.forEach(function (f) { Object.keys(f.values).forEach(function (k) { values[k] = f.values[k]; }); });
+      busy(saveBtn, api('cards.update', { id: c.id, patch: { title: title.value.trim() || c.title, values: values } }).then(function () {
+        changed = true; toast('Alterações salvas.'); return load();
+      })).catch(fail);
+    });
+    left.appendChild(h('div', { class: 'row' }, saveBtn));
+
+    // Lateral: mover, responsáveis, etiquetas, vencimento, comentários, histórico
+    var moveSel = h('select', { 'aria-label': 'Mover para a fase' }, b.phases.map(function (p) {
+      return h('option', { value: p.id }, p.name + (p.id === c.phaseId ? ' (atual)' : ''));
+    }));
+    moveSel.value = c.phaseId;
+    var moveBtn = h('button', { class: 'btn primary', onclick: function () {
+      if (moveSel.value === c.phaseId) return;
+      if (dirty) { toast('Salve as alterações antes de mover o card.', true); return; }
+      busy(moveBtn, api('cards.move', { id: c.id, phaseId: moveSel.value }).then(function () {
+        changed = true; toast('Card movido.'); return load();
+      })).catch(function (e) { moveSel.value = c.phaseId; fail(e); });
+    } }, 'Mover');
+    var idx = b.phases.indexOf(current);
+    var next = idx >= 0 ? b.phases[idx + 1] : null;
+
+    var assignees = (c.assignees || []).slice();
+    var assignBox = h('div', { class: 'choices' }, S.users.filter(function (u) { return u.active; }).map(function (u) {
+      return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: assignees.indexOf(u.id) >= 0, onchange: function (e) {
+        if (e.target.checked) assignees.push(u.id); else assignees.splice(assignees.indexOf(u.id), 1);
+        api('cards.update', { id: c.id, patch: { assignees: assignees.slice() } }).then(function () { changed = true; }).catch(fail);
+      } }), u.name);
+    }));
+
+    var labels = (c.labels || []).slice();
+    var labelBox = h('div', { class: 'choices' }, (b.pipe.labels || []).map(function (l) {
+      return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: labels.indexOf(l.id) >= 0, onchange: function (e) {
+        if (e.target.checked) labels.push(l.id); else labels.splice(labels.indexOf(l.id), 1);
+        api('cards.update', { id: c.id, patch: { labels: labels.slice() } }).then(function () { changed = true; }).catch(fail);
+      } }), h('span', { class: 'chip', style: 'background:' + l.color }, l.name));
+    }));
+
+    var due = h('input', { type: 'date', value: c.dueDate ? String(c.dueDate).slice(0, 10) : '', 'aria-label': 'Data de vencimento' });
+    due.addEventListener('change', function () {
+      api('cards.update', { id: c.id, patch: { dueDate: due.value } }).then(function () { changed = true; toast('Vencimento atualizado.'); }).catch(fail);
+    });
+
+    var commentText = h('textarea', { placeholder: 'Escreva um comentário…', style: 'min-height:60px', 'aria-label': 'Novo comentário' });
+    var commentBtn = h('button', { class: 'btn sm', onclick: function () {
+      busy(commentBtn, api('cards.comment', { id: c.id, text: commentText.value }).then(load)).catch(fail);
+    } }, 'Comentar');
+    var comments = d.comments.slice().sort(function (a, z) { return String(z.createdAt).localeCompare(String(a.createdAt)); });
+
+    var timeline = d.activity.slice().sort(function (a, z) { return String(z.createdAt).localeCompare(String(a.createdAt)); })
+      .map(function (a) { return h('div', {}, h('b', {}, userName(a.userId)), ' ', describeActivity(a), h('div', { class: 'muted' }, fmtDateTime(a.createdAt))); });
+
+    var phaseTimes = (c.history || []).map(function (x) {
+      var p = phaseById(x.phaseId);
+      var hrs = ((x.leftAt ? new Date(x.leftAt) : new Date()) - new Date(x.enteredAt)) / 3600000;
+      return h('div', { class: 'row small' }, h('span', { class: 'spacer' }, p ? p.name : 'Fase removida'), h('span', { class: 'muted' }, fmtDuration(hrs)));
+    });
+
+    var right = h('aside', { class: 'stack' },
+      h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Mover card'),
+        h('div', { class: 'row' }, h('div', { class: 'spacer' }, moveSel), moveBtn),
+        next ? h('button', { class: 'btn', onclick: function () { moveSel.value = next.id; moveBtn.click(); } }, 'Avançar para “' + next.name + '” →') : null),
+      h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Responsáveis'), assignBox),
+      (b.pipe.labels || []).length ? h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Etiquetas'), labelBox) : null,
+      h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Vencimento'), due),
+      h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Tempo em cada fase'), phaseTimes),
+      h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Comentários (' + comments.length + ')'), commentText,
+        h('div', { class: 'row' }, commentBtn),
+        comments.map(function (m) {
+          return h('div', { class: 'comment' }, h('div', { class: 'row small' }, h('b', {}, userName(m.userId)), h('span', { class: 'muted' }, fmtDateTime(m.createdAt))),
+            h('div', { style: 'white-space:pre-wrap' }, m.text));
+        })),
+      h('div', { class: 'side-block' }, h('span', { class: 'field-label' }, 'Histórico'), h('div', { class: 'timeline' }, timeline)),
+      h('div', { class: 'side-block' }, h('button', { class: 'btn danger', onclick: function () {
+        confirmBox('Excluir o card “' + c.title + '”?', 'Excluir').then(function (ok) {
+          if (!ok) return;
+          api('cards.delete', { id: c.id }).then(function () { changed = true; toast('Card excluído.'); close(); }).catch(fail);
+        });
+      } }, 'Excluir card')));
+
+    clear(body).appendChild(h('div', { class: 'card-layout' }, left, right));
+  }
+  load();
+}
+
+function describeActivity(a) {
+  var d = a.data || {};
+  switch (a.type) {
+    case 'created': return 'criou o card';
+    case 'moved': var f = phaseById(d.from), t = phaseById(d.to);
+      return 'moveu de “' + (f ? f.name : '?') + '” para “' + (t ? t.name : '?') + '”';
+    case 'fields_updated': return 'atualizou ' + (d.fields || []).length + ' campo(s)';
+    case 'assignees': return 'alterou os responsáveis';
+    case 'automation': return 'executou “' + d.automation + '”';
+    case 'automation_error': return 'falhou em “' + d.automation + '”: ' + d.error;
+    case 'email_sent': return 'enviou e-mail para ' + (d.to || []).join(', ');
+    case 'card_spawned': return 'criou um card conectado em outro pipe';
+    case 'deleted': return 'excluiu o card';
+    default: return a.type;
+  }
+}
+
+/* ---------- Lista ---------- */
+function renderList(container) {
+  var b = S.bundle;
+  var fields = pipeFields(b);
+  var colKey = 'fluxo_cols_' + b.pipe.id;
+  var chosen = (function () { try { return JSON.parse(store(colKey)) || null; } catch (e) { return null; } })() ||
+    (b.pipe.startFields || []).slice(0, 3).map(function (f) { return f.id; });
+  var tableBox = h('div', {});
+  var info = h('span', { class: 'muted small' });
+
+  (fields.filter(function (f) { return f.type === 'connection' && f.tableId; })).forEach(function (f) { loadRecords(f.tableId).then(draw); });
+
+  function rowsFor(cards) {
+    var cols = fields.filter(function (f) { return chosen.indexOf(f.id) >= 0; });
+    var head = ['Título', 'Fase', 'Responsáveis', 'Etiquetas', 'Criado em', 'Vencimento', 'Prazo'].concat(cols.map(function (f) { return f.label; }));
+    var rows = cards.map(function (c) {
+      var st = lateness(c);
+      var ph = phaseById(c.phaseId);
+      return [c.title, ph ? ph.name : '', (c.assignees || []).map(userName).join(', '),
+        (b.pipe.labels || []).filter(function (l) { return (c.labels || []).indexOf(l.id) >= 0; }).map(function (l) { return l.name; }).join(', '),
+        fmtDate(c.createdAt), fmtDate(c.dueDate), st.overdue ? 'Vencido' : st.late ? 'Atrasado' : st.expiring ? 'Expirando' : 'No prazo']
+        .concat(cols.map(function (f) { return formatValue(f, (c.values || {})[f.id]); }));
+    });
+    return { head: head, rows: rows };
+  }
+  function draw() {
+    var cards = filteredCards().sort(function (a, z) { return String(z.createdAt).localeCompare(String(a.createdAt)); });
+    var data = rowsFor(cards);
+    info.textContent = cards.length + ' card(s)';
+    clear(tableBox).appendChild(cards.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+      h('thead', {}, h('tr', {}, data.head.map(function (x) { return h('th', {}, x); }))),
+      h('tbody', {}, data.rows.map(function (r, i) {
+        return h('tr', { class: 'click', onclick: function () { openCard(cards[i].id); } }, r.map(function (v, j) {
+          return h('td', {}, j === 6 && v !== 'No prazo' ? h('span', { class: 'badge ' + (v === 'Expirando' ? 'expiring' : 'late') }, v) : v);
+        }));
+      })))) : h('div', { class: 'panel empty' }, 'Nenhum card com esses filtros.'));
+  }
+  var colsBtn = h('button', { class: 'btn', onclick: function () {
+    var box = h('div', { class: 'stack', style: 'gap:6px' }, fields.map(function (f) {
+      return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: chosen.indexOf(f.id) >= 0, onchange: function (e) {
+        if (e.target.checked) chosen.push(f.id); else chosen.splice(chosen.indexOf(f.id), 1);
+        store(colKey, JSON.stringify(chosen)); draw();
+      } }), f.label);
+    }));
+    modal('Colunas da lista', box, { noFocus: true, actions: function (close) { return [h('button', { class: 'btn primary', onclick: close }, 'Pronto')]; } });
+  } }, 'Colunas');
+  var exportBtn = h('button', { class: 'btn', onclick: function () {
+    var data = rowsFor(filteredCards());
+    downloadBlob(b.pipe.name.replace(/[^\w\- ]+/g, '') + '.csv', 'text/csv;charset=utf-8', toCsv([data.head].concat(data.rows)));
+  } }, 'Exportar CSV');
+  container.appendChild(filterBar(draw, true));
+  container.appendChild(h('div', { class: 'row', style: 'margin-bottom:10px' }, info, h('span', { class: 'spacer' }), colsBtn, exportBtn));
+  container.appendChild(tableBox);
+  draw();
+}
+
+/* ---------- Relatórios ---------- */
+function hbarChart(title, sub, items, fmt) {
+  var max = Math.max.apply(null, items.map(function (i) { return i.value; }).concat([0]));
+  var grid = h('div', { class: 'hbar', role: 'table', 'aria-label': title });
+  items.forEach(function (i) {
+    var fill = h('div', { class: 'fill', style: 'width:' + (max ? Math.max(1, i.value / max * 85) : 0) + '%' });
+    var track = h('div', { class: 'track', role: 'cell' }, fill, h('span', { class: 'val' }, fmt(i.value)));
+    tip(track, i.label + ': ' + fmt(i.value));
+    grid.appendChild(h('div', { class: 'name', role: 'rowheader', title: i.label }, i.label));
+    grid.appendChild(track);
+  });
+  return h('div', { class: 'panel chart' }, h('h3', {}, title), h('div', { class: 'sub' }, sub),
+    items.length ? grid : h('div', { class: 'muted small' }, 'Sem dados.'));
+}
+function vbarChart(title, sub, items) {
+  var max = Math.max.apply(null, items.map(function (i) { return i.value; }).concat([1]));
+  var bars = h('div', { class: 'vbars', role: 'img', 'aria-label': title + ': ' + items.map(function (i) { return i.label + ' ' + i.value; }).join(', ') },
+    items.map(function (i) {
+      var col = h('div', { class: 'col' }, h('span', { class: 'val' }, i.value || ''), h('div', { class: 'fill', style: 'height:' + (i.value / max * 82) + '%' }));
+      tip(col, i.full + ': ' + i.value);
+      return col;
+    }));
+  return h('div', { class: 'panel chart' }, h('h3', {}, title), h('div', { class: 'sub' }, sub), bars,
+    h('div', { class: 'vlabels' }, items.map(function (i) { return h('span', {}, i.label); })));
+}
+
+function renderReports(container) {
+  var b = S.bundle;
+  var period = h('select', { 'aria-label': 'Período' },
+    h('option', { value: '30' }, 'Últimos 30 dias'), h('option', { value: '90' }, 'Últimos 90 dias'),
+    h('option', { value: '365' }, 'Últimos 12 meses'), h('option', { value: '0' }, 'Todo o período'));
+  period.value = store('fluxo_period') || '90';
+  var out = h('div', {});
+  function draw() {
+    store('fluxo_period', period.value);
+    var days = Number(period.value);
+    var since = days ? Date.now() - days * 86400000 : 0;
+    var all = b.cards;
+    var inPeriod = all.filter(function (c) { return new Date(c.createdAt).getTime() >= since; });
+    var open = all.filter(function (c) { return !isDonePhase(phaseById(c.phaseId)); });
+    var done = all.filter(function (c) { return c.doneAt && new Date(c.doneAt).getTime() >= since; });
+    var late = open.filter(function (c) { return lateness(c).late; });
+    var lead = done.map(function (c) { return (new Date(c.doneAt) - new Date(c.createdAt)) / 3600000; });
+    var avgLead = lead.length ? lead.reduce(function (a, z) { return a + z; }, 0) / lead.length : 0;
+
+    var byPhase = b.phases.map(function (p) {
+      return { label: p.name, value: all.filter(function (c) { return c.phaseId === p.id; }).length };
+    });
+    var timeInPhase = b.phases.filter(function (p) { return !isDonePhase(p); }).map(function (p) {
+      var spans = [];
+      inPeriod.forEach(function (c) {
+        (c.history || []).forEach(function (x) {
+          if (x.phaseId === p.id) spans.push(((x.leftAt ? new Date(x.leftAt) : new Date()) - new Date(x.enteredAt)) / 3600000);
+        });
+      });
+      return { label: p.name, value: spans.length ? spans.reduce(function (a, z) { return a + z; }, 0) / spans.length / 24 : 0 };
+    });
+    var byUser = S.users.map(function (u) {
+      return { label: u.name, value: open.filter(function (c) { return (c.assignees || []).indexOf(u.id) >= 0; }).length };
+    }).filter(function (x) { return x.value > 0; }).sort(function (a, z) { return z.value - a.value; }).slice(0, 10);
+    var unassigned = open.filter(function (c) { return !(c.assignees || []).length; }).length;
+    if (unassigned) byUser.push({ label: 'Sem responsável', value: unassigned });
+
+    var weeks = [];
+    var monday = new Date(); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    for (var i = 11; i >= 0; i--) {
+      var s = new Date(monday.getTime() - i * 7 * 86400000), e = new Date(s.getTime() + 7 * 86400000);
+      var n = all.filter(function (c) { var t = new Date(c.createdAt); return t >= s && t < e; }).length;
+      weeks.push({ label: s.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), full: 'Semana de ' + s.toLocaleDateString('pt-BR'), value: n });
+    }
+
+    clear(out).appendChild(h('div', {},
+      h('div', { class: 'kpis' },
+        kpi(open.length, 'Cards abertos'),
+        kpi(inPeriod.length, 'Criados no período'),
+        kpi(done.length, 'Concluídos no período'),
+        kpi(late.length, 'Atrasados agora', late.length ? 'color:var(--danger)' : ''),
+        kpi(lead.length ? fmtDuration(avgLead) : '—', 'Tempo médio até concluir')),
+      h('div', { class: 'charts' },
+        hbarChart('Cards por fase', 'Situação atual de todos os cards', byPhase, function (v) { return v; }),
+        hbarChart('Tempo médio em cada fase', 'Em dias, cards criados no período', timeInPhase, function (v) { return v.toFixed(1).replace('.', ',') + ' d'; }),
+        vbarChart('Cards criados por semana', 'Últimas 12 semanas', weeks),
+        hbarChart('Cards abertos por responsável', 'Um card com dois responsáveis conta para os dois', byUser, function (v) { return v; }))));
+  }
+  function kpi(v, l, style) { return h('div', { class: 'kpi' }, h('div', { class: 'v', style: style || '' }, v), h('div', { class: 'l' }, l)); }
+  period.addEventListener('change', draw);
+  container.appendChild(h('div', { class: 'filters' }, period));
+  container.appendChild(out);
+  draw();
+}
+
+/* ---------- Automações ---------- */
+var TRIGGERS = {
+  card_created: 'Quando um card for criado',
+  card_moved: 'Quando um card entrar na fase…',
+  field_updated: 'Quando um campo for alterado…',
+  sla_late: 'Quando um card estourar o SLA da fase',
+  due_overdue: 'Quando um card passar do vencimento'
+};
+var ACTIONS = {
+  move_card: 'Mover o card para a fase…',
+  create_card: 'Criar um card em outro pipe',
+  send_email: 'Enviar e-mail',
+  assign: 'Adicionar responsáveis',
+  set_field: 'Preencher um campo',
+  add_label: 'Adicionar etiqueta',
+  comment: 'Adicionar comentário'
+};
+var OPS = { eq: 'é igual a', neq: 'é diferente de', contains: 'contém', empty: 'está vazio', not_empty: 'está preenchido', gt: 'é maior que', lt: 'é menor que' };
+
+function renderAutomations(container) {
+  var b = S.bundle;
+  var list = h('div', { class: 'stack' });
+  container.appendChild(h('div', { class: 'row', style: 'margin-bottom:12px' },
+    h('p', { class: 'muted spacer', style: 'margin:0' }, 'Regras “quando… então…” que trabalham pelo time. O SLA e os vencimentos são verificados de hora em hora.'),
+    isAdmin() ? h('button', { class: 'btn', onclick: function (e) {
+      busy(e.currentTarget, api('automations.runScheduled').then(function (r) {
+        toast(r.checked + ' card(s) verificados, ' + r.fired + ' gatilho(s) disparado(s).');
+      })).catch(fail);
+    } }, 'Verificar prazos agora') : null,
+    isAdmin() ? h('button', { class: 'btn primary', onclick: function () { automationDialog(null, draw); } }, '+ Nova automação') : null));
+  container.appendChild(list);
+  function draw() {
+    clear(list).appendChild(h('div', { class: 'loading' }, 'Carregando…'));
+    api('automations.list', { pipeId: b.pipe.id }).then(function (rules) {
+      clear(list);
+      if (!rules.length) list.appendChild(h('div', { class: 'panel empty' }, 'Nenhuma automação neste pipe.'));
+      rules.forEach(function (r) {
+        var active = r.active === true || r.active === 'TRUE' || r.active === 'true';
+        list.appendChild(h('div', { class: 'panel row' },
+          h('div', { class: 'spacer' }, h('h3', {}, r.name),
+            h('div', { class: 'small muted' }, describeTrigger(r.trigger) + ' → ' + (r.actions || []).map(function (a) { return ACTIONS[a.type] || a.type; }).join(', ')),
+            h('div', { class: 'small muted' }, 'Executada ' + (r.runs || 0) + ' vez(es)' + (r.lastRunAt ? ' · última em ' + fmtDateTime(r.lastRunAt) : ''))),
+          h('span', { class: 'badge ' + (active ? 'ok' : 'expiring') }, active ? '● Ativa' : '○ Pausada'),
+          isAdmin() ? h('button', { class: 'btn sm', onclick: function () { automationDialog(r, draw); } }, 'Editar') : null,
+          isAdmin() ? h('button', { class: 'btn sm danger', onclick: function () {
+            confirmBox('Excluir a automação “' + r.name + '”?', 'Excluir').then(function (ok) {
+              if (ok) api('automations.delete', { id: r.id }).then(draw).catch(fail);
+            });
+          } }, 'Excluir') : null));
+      });
+    }).catch(fail);
+  }
+  draw();
+}
+function describeTrigger(t) {
+  t = t || {};
+  var base = TRIGGERS[t.type] || t.type;
+  if (t.type === 'card_moved' || t.type === 'sla_late') { var p = phaseById(t.phaseId); return base.replace('…', '') + (p ? ' “' + p.name + '”' : t.type === 'sla_late' ? '' : ' (qualquer)'); }
+  if (t.type === 'field_updated') {
+    var f = pipeFields(S.bundle).filter(function (x) { return x.id === t.fieldId; })[0];
+    return base.replace('…', '') + (f ? ' “' + f.label + '”' : ' (qualquer)');
+  }
+  return base;
+}
+
+function automationDialog(rule, onSaved) {
+  var b = S.bundle;
+  var r = JSON.parse(JSON.stringify(rule || { pipeId: b.pipe.id, name: '', active: true, trigger: { type: 'card_created' }, conditions: [], actions: [{ type: 'move_card' }] }));
+  var fields = pipeFields(b);
+  function opt(list, val, first) {
+    var s = h('select', {}, first ? h('option', { value: '' }, first) : null, list.map(function (x) { return h('option', { value: x[0] }, x[1]); }));
+    s.value = val || '';
+    return s;
+  }
+  var phaseList = b.phases.map(function (p) { return [p.id, p.name]; });
+  var fieldList = [['__title', 'Título do card']].concat(fields.map(function (f) { return [f.id, f.label]; }));
+  var name = h('input', { type: 'text', value: r.name, placeholder: 'Ex.: Avisar o financeiro' });
+  var active = h('input', { type: 'checkbox', checked: r.active === true || r.active === 'TRUE' || r.active === 'true' });
+  var trigBox = h('div', { class: 'rule' });
+  var condBox = h('div', { class: 'rule' });
+  var actBox = h('div', { class: 'rule' });
+
+  function drawTrigger() {
+    var t = opt(Object.keys(TRIGGERS).map(function (k) { return [k, TRIGGERS[k]]; }), r.trigger.type);
+    t.addEventListener('change', function () { r.trigger = { type: t.value }; drawTrigger(); });
+    var extra = null;
+    if (r.trigger.type === 'card_moved' || r.trigger.type === 'sla_late') {
+      extra = opt(phaseList, r.trigger.phaseId, 'Qualquer fase');
+      extra.addEventListener('change', function () { r.trigger.phaseId = extra.value; });
+    } else if (r.trigger.type === 'field_updated') {
+      extra = opt(fields.map(function (f) { return [f.id, f.label]; }), r.trigger.fieldId, 'Qualquer campo');
+      extra.addEventListener('change', function () { r.trigger.fieldId = extra.value; });
+    }
+    clear(trigBox).appendChild(h('div', { class: 'rule-line' }, t, extra));
+  }
+  function drawConds() {
+    clear(condBox);
+    r.conditions.forEach(function (c, i) {
+      var f = opt(fieldList, c.fieldId); c.fieldId = f.value;
+      var o = opt(Object.keys(OPS).map(function (k) { return [k, OPS[k]]; }), c.op || 'eq'); c.op = o.value;
+      var v = h('input', { type: 'text', value: c.value || '', placeholder: 'Valor' });
+      f.addEventListener('change', function () { c.fieldId = f.value; });
+      o.addEventListener('change', function () { c.op = o.value; v.classList.toggle('hidden', c.op === 'empty' || c.op === 'not_empty'); });
+      v.addEventListener('input', function () { c.value = v.value; });
+      if (c.op === 'empty' || c.op === 'not_empty') v.classList.add('hidden');
+      condBox.appendChild(h('div', { class: 'rule-line' }, f, o, v,
+        h('button', { class: 'btn ghost icon', 'aria-label': 'Remover condição', onclick: function () { r.conditions.splice(i, 1); drawConds(); } }, '✕')));
+    });
+    condBox.appendChild(h('div', {}, h('button', { class: 'btn sm', onclick: function () { r.conditions.push({ fieldId: '__title', op: 'eq', value: '' }); drawConds(); } }, '+ Condição')));
+  }
+  function drawActions() {
+    clear(actBox);
+    r.actions.forEach(function (a, i) {
+      var type = opt(Object.keys(ACTIONS).map(function (k) { return [k, ACTIONS[k]]; }), a.type);
+      type.addEventListener('change', function () { r.actions[i] = { type: type.value }; drawActions(); });
+      var params = [];
+      function bindInput(el, key, evt) { el.addEventListener(evt || 'input', function () { a[key] = el.type === 'checkbox' ? el.checked : el.value; }); return el; }
+      if (a.type === 'move_card') {
+        params.push(bindInput(opt(phaseList, a.phaseId, 'Escolha a fase'), 'phaseId', 'change'));
+      } else if (a.type === 'create_card') {
+        var others = S.pipes.map(function (s) { return [s.pipe.id, s.pipe.name]; });
+        params.push(bindInput(opt(others, a.pipeId, 'Pipe de destino'), 'pipeId', 'change'));
+        params.push(h('label', { class: 'choice' }, bindInput(h('input', { type: 'checkbox', checked: !!a.copyValues }), 'copyValues', 'change'), 'Copiar campos com o mesmo nome'));
+      } else if (a.type === 'send_email') {
+        params.push(bindInput(h('input', { type: 'text', value: a.to || '', placeholder: 'Para: e-mails, {{responsaveis}}, {{criador}}, {{campo:Nome}}' }), 'to'));
+        params.push(bindInput(h('input', { type: 'text', value: a.subject || '', placeholder: 'Assunto' }), 'subject'));
+        params.push(bindInput(h('textarea', { value: a.body || '', placeholder: 'Mensagem. Use {{titulo}}, {{fase}}, {{pipe}}, {{link}}, {{vencimento}}, {{campo:Nome do campo}}' }), 'body'));
+      } else if (a.type === 'assign') {
+        var set = a.userIds = a.userIds || [];
+        params.push(h('div', { class: 'choices' }, S.users.map(function (u) {
+          return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: set.indexOf(u.id) >= 0, onchange: function (e) {
+            if (e.target.checked) set.push(u.id); else set.splice(set.indexOf(u.id), 1);
+          } }), u.name);
+        })));
+      } else if (a.type === 'set_field') {
+        params.push(bindInput(opt(fields.map(function (f) { return [f.id, f.label]; }), a.fieldId, 'Campo'), 'fieldId', 'change'));
+        params.push(bindInput(h('input', { type: 'text', value: a.value || '', placeholder: 'Valor' }), 'value'));
+      } else if (a.type === 'add_label') {
+        params.push(bindInput(opt((b.pipe.labels || []).map(function (l) { return [l.id, l.name]; }), a.labelId, 'Etiqueta'), 'labelId', 'change'));
+      } else if (a.type === 'comment') {
+        params.push(bindInput(h('textarea', { value: a.text || '', placeholder: 'Texto do comentário (aceita {{titulo}}, {{fase}}…)' }), 'text'));
+      }
+      actBox.appendChild(h('div', { class: 'rule-line' },
+        h('div', { class: 'stack', style: 'gap:6px' }, type, params),
+        h('button', { class: 'btn ghost icon', 'aria-label': 'Remover ação', onclick: function () { r.actions.splice(i, 1); drawActions(); } }, '✕')));
+    });
+    actBox.appendChild(h('div', {}, h('button', { class: 'btn sm', onclick: function () { r.actions.push({ type: 'comment' }); drawActions(); } }, '+ Ação')));
+  }
+  drawTrigger(); drawConds(); drawActions();
+  modal(rule ? 'Editar automação' : 'Nova automação', [
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nome'), name),
+    h('label', { class: 'choice' }, active, 'Ativa'),
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Quando'), trigBox),
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Se (todas as condições)'), condBox),
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Então'), actBox)
+  ], {
+    wide: true,
+    actions: function (close) {
+      var btn = h('button', { class: 'btn primary', onclick: function () {
+        r.name = name.value; r.active = active.checked;
+        busy(btn, api('automations.save', { automation: r }).then(function () { close(); toast('Automação salva.'); onSaved(); })).catch(fail);
+      } }, 'Salvar');
+      return [h('button', { class: 'btn', onclick: close }, 'Cancelar'), btn];
+    }
+  });
+}
+
+/* ---------- Configuração do pipe ---------- */
+function fieldsEditor(fields, opts) {
+  opts = opts || {};
+  var box = h('div', { class: 'stack', style: 'gap:8px' });
+  function draw() {
+    clear(box);
+    fields.forEach(function (f, i) {
+      var label = h('input', { type: 'text', value: f.label, 'aria-label': 'Nome do campo', placeholder: 'Nome do campo' });
+      label.addEventListener('input', function () { f.label = label.value; });
+      var type = h('select', { 'aria-label': 'Tipo do campo' }, Object.keys(FIELD_TYPE_NAMES).filter(function (k) {
+        return !(opts.noConnection && k === 'connection');
+      }).map(function (k) { return h('option', { value: k }, FIELD_TYPE_NAMES[k]); }));
+      type.value = f.type;
+      type.addEventListener('change', function () { f.type = type.value; draw(); });
+      var req = h('label', { class: 'choice small' }, h('input', { type: 'checkbox', checked: !!f.required, onchange: function (e) { f.required = e.target.checked; } }), 'Obrigatório');
+      var tools = h('div', { class: 'row', style: 'gap:2px' },
+        h('button', { class: 'btn ghost icon', 'aria-label': 'Subir', disabled: i === 0, onclick: function () { fields.splice(i - 1, 0, fields.splice(i, 1)[0]); draw(); } }, '↑'),
+        h('button', { class: 'btn ghost icon', 'aria-label': 'Descer', disabled: i === fields.length - 1, onclick: function () { fields.splice(i + 1, 0, fields.splice(i, 1)[0]); draw(); } }, '↓'),
+        h('button', { class: 'btn ghost icon danger', 'aria-label': 'Remover campo', onclick: function () { fields.splice(i, 1); draw(); } }, '✕'));
+      var extra = null;
+      if (['select', 'radio', 'checklist'].indexOf(f.type) >= 0) {
+        var o = h('input', { type: 'text', value: (f.options || []).join(', '), placeholder: 'Opções separadas por vírgula' });
+        o.addEventListener('input', function () { f.options = o.value.split(',').map(function (x) { return x.trim(); }).filter(String); });
+        extra = o;
+      } else if (f.type === 'connection') {
+        var t = h('select', {}, h('option', { value: '' }, 'Escolha a database'), S.tables.map(function (x) { return h('option', { value: x.id }, x.name); }));
+        t.value = f.tableId || '';
+        t.addEventListener('change', function () { f.tableId = t.value; });
+        extra = t;
+      }
+      var helpIn = h('input', { type: 'text', value: f.help || '', placeholder: 'Texto de ajuda (opcional)' });
+      helpIn.addEventListener('input', function () { f.help = helpIn.value; });
+      box.appendChild(h('div', { class: 'fe-row' }, label, type, req, tools,
+        extra ? h('div', { class: 'fe-extra' }, extra) : null, h('div', { class: 'fe-extra' }, helpIn)));
+    });
+    box.appendChild(h('div', {}, h('button', { class: 'btn sm', onclick: function () {
+      fields.push({ label: '', type: 'text', required: false }); draw();
+      var ins = box.querySelectorAll('.fe-row input[type=text]'); if (ins.length) ins[ins.length - 2].focus();
+    } }, '+ Adicionar campo')));
+  }
+  draw();
+  return box;
+}
+
+function renderConfig(container) {
+  var b = S.bundle;
+  var pipe = JSON.parse(JSON.stringify(b.pipe));
+  pipe.publicForm = pipe.publicForm === true || pipe.publicForm === 'TRUE' || pipe.publicForm === 'true';
+  function savePipeBtn(text) {
+    var btn = h('button', { class: 'btn primary', onclick: function () {
+      busy(btn, api('pipes.save', { pipe: pipe }).then(function () { toast('Pipe salvo.'); renderPipe(pipe.id, 'config'); })).catch(fail);
+    } }, text || 'Salvar');
+    return btn;
+  }
+  // Geral
+  var name = h('input', { type: 'text', value: pipe.name }); name.addEventListener('input', function () { pipe.name = name.value; });
+  var desc = h('textarea', { value: pipe.description || '', style: 'min-height:60px' }); desc.addEventListener('input', function () { pipe.description = desc.value; });
+  var color = h('div', { class: 'row', role: 'radiogroup', 'aria-label': 'Cor' }, LABEL_COLORS.map(function (c) {
+    return h('button', { class: 'btn icon', 'aria-label': 'Cor ' + c, 'aria-pressed': String(pipe.color === c), style: 'background:' + c + ';width:28px;height:28px;' + (pipe.color === c ? 'outline:3px solid var(--text);outline-offset:1px' : ''),
+      onclick: function () { pipe.color = c; Array.prototype.forEach.call(color.children, function (x) { x.style.outline = ''; }); this.style.outline = '3px solid var(--text)'; } });
+  }));
+  var members = pipe.members || [];
+  var memberBox = h('div', { class: 'choices' }, S.users.map(function (u) {
+    return h('label', { class: 'choice' }, h('input', { type: 'checkbox', checked: members.indexOf(u.id) >= 0, onchange: function (e) {
+      if (e.target.checked) members.push(u.id); else members.splice(members.indexOf(u.id), 1);
+      pipe.members = members;
+    } }), u.name + (u.role === 'admin' ? ' (admin)' : ''));
+  }));
+  // Formulário público
+  var publicUrl = (S.appUrl || '') + '?form=' + pipe.publicToken;
+  var pubToggle = h('input', { type: 'checkbox', checked: pipe.publicForm, onchange: function (e) { pipe.publicForm = e.target.checked; } });
+  var urlInput = h('input', { type: 'text', value: publicUrl, readonly: true, 'aria-label': 'Link do formulário público' });
+  // Etiquetas
+  var labels = pipe.labels = pipe.labels || [];
+  var labelBox = h('div', { class: 'stack', style: 'gap:6px' });
+  function drawLabels() {
+    clear(labelBox);
+    labels.forEach(function (l, i) {
+      var n = h('input', { type: 'text', value: l.name, 'aria-label': 'Nome da etiqueta' }); n.addEventListener('input', function () { l.name = n.value; });
+      var c = h('select', { 'aria-label': 'Cor da etiqueta', style: 'width:auto;color:' + l.color }, LABEL_COLORS.map(function (x) { return h('option', { value: x, style: 'color:' + x }, '■ ' + x); }));
+      c.value = l.color; c.addEventListener('change', function () { l.color = c.value; c.style.color = c.value; });
+      labelBox.appendChild(h('div', { class: 'row' }, h('div', { class: 'spacer' }, n), c,
+        h('button', { class: 'btn ghost icon danger', 'aria-label': 'Remover etiqueta', onclick: function () { labels.splice(i, 1); drawLabels(); } }, '✕')));
+    });
+    labelBox.appendChild(h('div', {}, h('button', { class: 'btn sm', onclick: function () { labels.push({ name: '', color: LABEL_COLORS[labels.length % 8] }); drawLabels(); } }, '+ Etiqueta')));
+  }
+  drawLabels();
+
+  var phasesBox = h('div', { class: 'stack' });
+  b.phases.forEach(function (ph, i) {
+    var p = JSON.parse(JSON.stringify(ph));
+    p.isDone = isDonePhase(p);
+    var pn = h('input', { type: 'text', value: p.name, 'aria-label': 'Nome da fase' }); pn.addEventListener('input', function () { p.name = pn.value; });
+    var sla = h('input', { type: 'number', min: '0', step: '1', value: p.slaHours, placeholder: 'Sem SLA', style: 'width:120px', 'aria-label': 'SLA em horas' });
+    sla.addEventListener('input', function () { p.slaHours = sla.value; });
+    var done = h('label', { class: 'choice small' }, h('input', { type: 'checkbox', checked: p.isDone, onchange: function (e) { p.isDone = e.target.checked; } }), 'Fase final (conclui o card)');
+    var saveBtn = h('button', { class: 'btn primary sm', onclick: function () {
+      busy(saveBtn, api('phases.save', { phase: p }).then(function () { toast('Fase salva.'); renderPipe(b.pipe.id, 'config'); })).catch(fail);
+    } }, 'Salvar fase');
+    function moveTo(j) {
+      var ids = b.phases.map(function (x) { return x.id; });
+      ids.splice(j, 0, ids.splice(i, 1)[0]);
+      api('phases.reorder', { pipeId: b.pipe.id, ids: ids }).then(function () { renderPipe(b.pipe.id, 'config'); }).catch(fail);
+    }
+    phasesBox.appendChild(h('div', { class: 'section phase-edit' },
+      h('div', { class: 'row' }, h('div', { class: 'spacer' }, pn),
+        h('label', { class: 'row small' }, 'SLA (horas)', sla), done),
+      h('span', { class: 'field-label' }, 'Campos preenchidos nesta fase'),
+      fieldsEditor(p.fields = p.fields || []),
+      h('div', { class: 'row' }, saveBtn,
+        h('button', { class: 'btn sm', disabled: i === 0, onclick: function () { moveTo(i - 1); } }, '← Antes'),
+        h('button', { class: 'btn sm', disabled: i === b.phases.length - 1, onclick: function () { moveTo(i + 1); } }, 'Depois →'),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'btn sm danger', onclick: function () {
+          confirmBox('Excluir a fase “' + p.name + '”?', 'Excluir').then(function (ok) {
+            if (ok) api('phases.delete', { id: p.id }).then(function () { renderPipe(b.pipe.id, 'config'); }).catch(fail);
+          });
+        } }, 'Excluir fase'))));
+  });
+
+  container.appendChild(h('div', { class: 'stack' },
+    h('div', { class: 'panel stack' }, h('h2', {}, 'Geral'),
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nome'), name),
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Descrição'), desc),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Cor'), color),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Membros'), h('span', { class: 'help' }, 'Sem ninguém marcado, todos os usuários veem o pipe. Administradores sempre veem.'), memberBox),
+      h('div', { class: 'row' }, savePipeBtn())),
+    h('div', { class: 'panel stack' }, h('h2', {}, 'Formulário público'),
+      h('p', { class: 'muted small', style: 'margin:0' }, 'Qualquer pessoa com o link pode abrir um card, sem login. Campos de responsável e de conexão ficam de fora.'),
+      h('label', { class: 'choice' }, pubToggle, 'Formulário público ativo'),
+      h('div', { class: 'copybox' }, urlInput, h('button', { class: 'btn', onclick: function () {
+        urlInput.select();
+        try { navigator.clipboard.writeText(publicUrl).then(function () { toast('Link copiado.'); }, function () { document.execCommand('copy'); toast('Link copiado.'); }); }
+        catch (e) { document.execCommand('copy'); toast('Link copiado.'); }
+      } }, 'Copiar')),
+      h('div', { class: 'row' }, savePipeBtn())),
+    h('div', { class: 'panel stack' }, h('h2', {}, 'Etiquetas'), labelBox, h('div', { class: 'row' }, savePipeBtn())),
+    h('div', { class: 'panel stack' }, h('h2', {}, 'Formulário inicial'),
+      h('p', { class: 'muted small', style: 'margin:0' }, 'Campos pedidos ao criar o card. O primeiro campo de texto preenchido vira o título.'),
+      fieldsEditor(pipe.startFields = pipe.startFields || []), h('div', { class: 'row' }, savePipeBtn('Salvar formulário'))),
+    h('div', { class: 'panel stack' }, h('div', { class: 'row' }, h('h2', { class: 'spacer' }, 'Fases'),
+      h('button', { class: 'btn', onclick: function (e) {
+        busy(e.currentTarget, api('phases.save', { phase: { pipeId: b.pipe.id, name: 'Nova fase', fields: [] } }).then(function () { renderPipe(b.pipe.id, 'config'); })).catch(fail);
+      } }, '+ Nova fase')), phasesBox),
+    h('div', { class: 'panel stack' }, h('h2', {}, 'Zona de perigo'),
+      h('div', {}, h('button', { class: 'btn danger', onclick: function () {
+        confirmBox('Excluir o pipe “' + b.pipe.name + '” com todos os cards e automações? Isso não pode ser desfeito.', 'Excluir pipe').then(function (ok) {
+          if (ok) api('pipes.delete', { id: b.pipe.id }).then(function () { S.bundle = null; toast('Pipe excluído.'); go('#/'); }).catch(fail);
+        });
+      } }, 'Excluir pipe')))));
+}
+
+/* ===================== Databases ===================== */
+function renderTables() {
+  api('tables.list').then(function (tables) {
+    S.tables = tables;
+    shell([
+      h('div', { class: 'page-head' }, h('div', { class: 'spacer' }, h('h1', {}, 'Databases'),
+        h('div', { class: 'muted small' }, 'Cadastros reutilizáveis (fornecedores, projetos, contatos…) que os cards podem referenciar.')),
+        isAdmin() ? h('button', { class: 'btn primary', onclick: function () { tableDialog(null); } }, '+ Nova database') : null),
+      tables.length ? h('div', { class: 'grid' }, tables.map(function (t) {
+        return h('div', { class: 'panel pipe-tile', tabindex: '0', role: 'link', onclick: function () { go('#/database/' + t.id); },
+          onkeydown: function (e) { if (e.key === 'Enter') go('#/database/' + t.id); } },
+          h('h3', {}, t.name), t.description ? h('div', { class: 'muted small' }, t.description) : null,
+          h('div', { class: 'muted small' }, (t.fields || []).length + ' campo(s)'));
+      })) : h('div', { class: 'panel empty' }, 'Nenhuma database criada.')
+    ], 'tables');
+  }).catch(fail);
+}
+
+function tableDialog(table) {
+  var t = JSON.parse(JSON.stringify(table || { name: '', description: '', fields: [{ label: 'Nome', type: 'text', required: true }] }));
+  var name = h('input', { type: 'text', value: t.name }); name.addEventListener('input', function () { t.name = name.value; });
+  var desc = h('input', { type: 'text', value: t.description || '' }); desc.addEventListener('input', function () { t.description = desc.value; });
+  modal(table ? 'Editar database' : 'Nova database', [
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nome'), name),
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Descrição'), desc),
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Campos (o primeiro identifica o registro)'), fieldsEditor(t.fields, { noConnection: true }))
+  ], {
+    wide: true,
+    actions: function (close) {
+      var btn = h('button', { class: 'btn primary', onclick: function () {
+        t.titleFieldId = t.fields[0] && t.fields[0].id;
+        busy(btn, api('tables.save', { table: t }).then(function (saved) { close(); toast('Database salva.'); go('#/database/' + saved.id); })).catch(fail);
+      } }, 'Salvar');
+      return [h('button', { class: 'btn', onclick: close }, 'Cancelar'), btn];
+    }
+  });
+}
+
+function renderTable(id) {
+  Promise.all([api('tables.list'), api('records.list', { tableId: id })]).then(function (res) {
+    S.tables = res[0];
+    var t = S.tables.filter(function (x) { return x.id === id; })[0];
+    if (!t) { toast('Database não encontrada.', true); return go('#/databases'); }
+    var records = res[1];
+    S.records[id] = records;
+    var q = h('input', { type: 'search', placeholder: 'Buscar registros…', 'aria-label': 'Buscar registros' });
+    var box = h('div', {});
+    function rows(list) { return list.map(function (r) { return t.fields.map(function (f) { return formatValue(f, (r.values || {})[f.id]); }); }); }
+    function draw() {
+      var term = q.value.trim().toLowerCase();
+      var list = records.filter(function (r) { return !term || JSON.stringify(r.values).toLowerCase().indexOf(term) >= 0; });
+      clear(box).appendChild(list.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+        h('thead', {}, h('tr', {}, t.fields.map(function (f) { return h('th', {}, f.label); }))),
+        h('tbody', {}, rows(list).map(function (r, i) {
+          return h('tr', { class: 'click', onclick: function () { recordDialog(t, list[i]); } }, r.map(function (v) { return h('td', {}, v); }));
+        })))) : h('div', { class: 'panel empty' }, records.length ? 'Nada encontrado.' : 'Nenhum registro ainda.'));
+    }
+    q.addEventListener('input', draw);
+    shell([
+      h('div', { class: 'page-head' },
+        h('div', { class: 'spacer' }, h('a', { href: '#/databases', onclick: link('#/databases'), class: 'small' }, '← Databases'), h('h1', {}, t.name),
+          t.description ? h('div', { class: 'muted small' }, t.description) : null),
+        isAdmin() ? h('button', { class: 'btn', onclick: function () { tableDialog(t); } }, 'Editar campos') : null,
+        isAdmin() ? h('button', { class: 'btn danger', onclick: function () {
+          confirmBox('Excluir a database “' + t.name + '” e todos os registros?', 'Excluir').then(function (ok) {
+            if (ok) api('tables.delete', { id: t.id }).then(function () { go('#/databases'); }).catch(fail);
+          });
+        } }, 'Excluir') : null,
+        h('button', { class: 'btn', onclick: function () {
+          downloadBlob(t.name + '.csv', 'text/csv;charset=utf-8', toCsv([t.fields.map(function (f) { return f.label; })].concat(rows(records))));
+        } }, 'Exportar CSV'),
+        h('button', { class: 'btn primary', onclick: function () { recordDialog(t, null); } }, '+ Novo registro')),
+      h('div', { class: 'filters' }, q, h('span', { class: 'muted small' }, records.length + ' registro(s)')),
+      box
+    ], 'table');
+    draw();
+  }).catch(fail);
+}
+
+function recordDialog(t, rec) {
+  var form = buildForm(t.fields, rec ? rec.values : {}, { upload: uploadViaApi });
+  modal(rec ? 'Editar registro' : 'Novo registro', form.el, {
+    actions: function (close) {
+      var save = h('button', { class: 'btn primary', onclick: function () {
+        if (!form.validate()) return;
+        busy(save, api('records.save', { record: { id: rec && rec.id, tableId: t.id, values: form.values } }).then(function () {
+          close(); delete S.records[t.id]; toast('Registro salvo.'); renderTable(t.id);
+        })).catch(fail);
+      } }, 'Salvar');
+      return [rec ? h('button', { class: 'btn danger', onclick: function () {
+        confirmBox('Excluir este registro?', 'Excluir').then(function (ok) {
+          if (ok) api('records.delete', { id: rec.id }).then(function () { close(); delete S.records[t.id]; renderTable(t.id); }).catch(fail);
+        });
+      } }, 'Excluir') : null, h('span', { class: 'spacer' }), h('button', { class: 'btn', onclick: close }, 'Cancelar'), save];
+    }
+  });
+}
+
+/* ===================== Administração e conta ===================== */
+function renderAdmin() {
+  if (!isAdmin()) return go('#/');
+  api('users.list').then(function (users) {
+    S.users = users;
+    var tbody = h('tbody', {}, users.map(function (u) {
+      var role = h('select', { 'aria-label': 'Papel de ' + u.name, style: 'width:auto' }, h('option', { value: 'member' }, 'Membro'), h('option', { value: 'admin' }, 'Administrador'));
+      role.value = u.role;
+      role.addEventListener('change', function () {
+        api('users.update', { id: u.id, patch: { role: role.value } }).then(function () { toast('Papel atualizado.'); }).catch(function (e) { role.value = u.role; fail(e); });
+      });
+      return h('tr', {}, h('td', {}, u.name), h('td', {}, u.email), h('td', {}, role),
+        h('td', {}, h('span', { class: 'badge ' + (u.active ? 'ok' : 'late') }, u.active ? 'Ativo' : 'Desativado')),
+        h('td', {}, h('div', { class: 'row' },
+          h('button', { class: 'btn sm', onclick: function () {
+            api('users.update', { id: u.id, patch: { active: !u.active } }).then(renderAdmin).catch(fail);
+          } }, u.active ? 'Desativar' : 'Reativar'),
+          h('button', { class: 'btn sm', onclick: function () { passwordDialog(u); } }, 'Redefinir senha'))));
+    }));
+    shell([
+      h('div', { class: 'page-head' }, h('h1', { class: 'spacer' }, 'Administração'),
+        h('button', { class: 'btn primary', onclick: newUserDialog }, '+ Novo usuário')),
+      h('div', { class: 'table-wrap', style: 'margin-bottom:16px' }, h('table', { class: 'data' },
+        h('thead', {}, h('tr', {}, ['Nome', 'E-mail', 'Papel', 'Situação', ''].map(function (x) { return h('th', {}, x); }))), tbody)),
+      h('div', { class: 'panel stack' }, h('h2', {}, 'Sistema'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', onclick: function (e) {
+            busy(e.currentTarget, api('setup.installTriggers').then(function () { toast('Verificação de hora em hora ativada.'); })).catch(fail);
+          } }, 'Ativar verificação automática de SLA'),
+          h('button', { class: 'btn', onclick: function (e) { seedDemo(e.currentTarget); } }, 'Carregar dados de exemplo')),
+        h('p', { class: 'muted small', style: 'margin:0' }, 'A verificação automática cria um gatilho de tempo no Apps Script que dispara as automações de SLA e de vencimento.'))
+    ], 'admin');
+  }).catch(fail);
+}
+
+function newUserDialog() {
+  var name = h('input', { type: 'text' }), email = h('input', { type: 'email' }), pass = h('input', { type: 'text', value: randomPassword() });
+  var role = h('select', {}, h('option', { value: 'member' }, 'Membro'), h('option', { value: 'admin' }, 'Administrador'));
+  modal('Novo usuário', [
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nome'), name),
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'E-mail'), email),
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Senha inicial'), pass, h('span', { class: 'help' }, 'Envie a senha à pessoa; ela pode trocá-la em “Minha conta”.')),
+    h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Papel'), role)
+  ], {
+    actions: function (close) {
+      var btn = h('button', { class: 'btn primary', onclick: function () {
+        busy(btn, api('users.create', { name: name.value, email: email.value, password: pass.value, role: role.value })
+          .then(function () { close(); toast('Usuário criado.'); renderAdmin(); })).catch(fail);
+      } }, 'Criar');
+      return [h('button', { class: 'btn', onclick: close }, 'Cancelar'), btn];
+    }
+  });
+}
+function randomPassword() {
+  var chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var a = new Uint32Array(12); crypto.getRandomValues(a);
+  return Array.prototype.map.call(a, function (x) { return chars[x % chars.length]; }).join('');
+}
+function passwordDialog(u) {
+  var pass = h('input', { type: 'text', value: randomPassword() });
+  modal('Redefinir senha de ' + u.name, [h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nova senha'), pass)], {
+    actions: function (close) {
+      var btn = h('button', { class: 'btn primary', onclick: function () {
+        busy(btn, api('users.resetPassword', { id: u.id, password: pass.value }).then(function () { close(); toast('Senha redefinida.'); })).catch(fail);
+      } }, 'Redefinir');
+      return [h('button', { class: 'btn', onclick: close }, 'Cancelar'), btn];
+    }
+  });
+}
+
+function renderAccount() {
+  var cur = h('input', { type: 'password', autocomplete: 'current-password' });
+  var nxt = h('input', { type: 'password', autocomplete: 'new-password' });
+  var btn = h('button', { class: 'btn primary' }, 'Trocar senha');
+  btn.addEventListener('click', function () {
+    busy(btn, api('auth.changePassword', { current: cur.value, next: nxt.value }).then(function () {
+      cur.value = nxt.value = ''; toast('Senha alterada.');
+    })).catch(fail);
+  });
+  shell([h('div', { class: 'page-head' }, h('h1', {}, 'Minha conta')),
+    h('div', { class: 'panel stack', style: 'max-width:420px' },
+      h('div', {}, h('b', {}, S.user.name), h('div', { class: 'muted' }, S.user.email + ' · ' + (S.user.role === 'admin' ? 'Administrador' : 'Membro'))),
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Senha atual'), cur),
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Nova senha'), nxt, h('span', { class: 'help' }, 'Mínimo de 8 caracteres.')),
+      h('div', {}, btn))], 'account');
+}
+
+/* ===================== Início ===================== */
+function renderPublicForm(token) {
+  var root = clear($('#app'));
+  root.appendChild(h('div', { class: 'loading' }, 'Carregando formulário…'));
+  papi('form.get', { token: token }).then(function (f) {
+    var form = buildForm(f.fields, {}, {
+      publicForm: true,
+      upload: function (file, data) { return papi('form.upload', { token: token, name: file.name, mimeType: file.type, data: data }); }
+    });
+    var btn = h('button', { class: 'btn primary', type: 'submit' }, 'Enviar');
+    var panel = h('form', { class: 'panel stack', style: 'max-width:640px;margin:24px auto;border-top:6px solid ' + f.color },
+      h('h1', {}, f.name), f.description ? h('p', { class: 'muted', style: 'margin:0' }, f.description) : null,
+      form.el, h('div', {}, btn));
+    panel.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!form.validate()) return;
+      busy(btn, papi('form.submit', { token: token, values: form.values }).then(function () {
+        clear(panel).appendChild(h('div', { class: 'empty' }, h('h2', {}, 'Recebemos sua solicitação.'),
+          h('p', {}, 'Obrigado! Ela já está na fila de atendimento.'),
+          h('button', { class: 'btn', type: 'button', onclick: function () { renderPublicForm(token); } }, 'Enviar outra resposta')));
+      })).catch(fail);
+    });
+    clear(root).appendChild(h('div', { class: 'page' }, panel));
+  }).catch(function (e) {
+    clear(root).appendChild(h('div', { class: 'page' }, h('div', { class: 'panel empty' }, e.message)));
+  });
+}
+
+(function init() {
+  if (window.FLUXO_FORM_TOKEN) return renderPublicForm(window.FLUXO_FORM_TOKEN);
+  try { google.script.history.setChangeHandler(function (e) { S.route = parseHash(e.location.hash); render(); }); } catch (e) { /* ok */ }
+  S.token = store('fluxo_token');
+  if (S.token) start(); else renderAuth();
+})();
+</script>
