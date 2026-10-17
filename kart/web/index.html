@@ -2,7 +2,15 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Kart Turbo">
+  <meta name="theme-color" content="#0b0e1a">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
   <title>Kart Turbo</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -11,6 +19,7 @@
   <div id="hud"></div>
   <div id="ui" class="hidden"></div>
   <div id="loading"><div class="spinner"></div>Carregando…</div>
+  <div id="rotate"><div class="phone-icon"></div>Gire o aparelho para jogar deitado</div>
   <script src="lib/three.min.js"></script>
   <script src="js/tracks-data.js"></script>
   <script src="js/sound.js"></script>
@@ -21,5 +30,10 @@
   <script src="js/touch.js"></script>
   <script src="js/menu.js"></script>
   <script src="js/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* sem cache offline */ });
+    }
+  </script>
 </body>
 </html>

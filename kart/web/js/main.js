@@ -239,7 +239,10 @@
       Menu.selector('Efeitos sonoros', [[true, 'Ligados'], [false, 'Desligados']], function () { return settings.sound; }, function (v) { settings.sound = v; saveSettings(); }),
       Menu.selector('Música', [[true, 'Ligada'], [false, 'Desligada']], function () { return settings.music; }, function (v) { settings.music = v; saveSettings(); }),
       Menu.selector('Botões estilo Nintendo', [[false, 'Não'], [true, 'Sim (A à direita)']], function () { return settings.nintendo; }, function (v) { settings.nintendo = v; saveSettings(); }),
-      Menu.selector('Direção no celular', [['buttons', 'Botões na tela'], ['tilt', 'Inclinar o celular']], function () { return settings.steer; }, function (v) { settings.steer = v; saveSettings(); }),
+      Menu.selector('Direção no celular', [['buttons', 'Botões na tela'], ['tilt', 'Inclinar o celular']], function () { return settings.steer; }, function (v) {
+        settings.steer = v; saveSettings();
+        if (v === 'tilt') Touch.requestTilt().then(function (ok) { if (!ok) { settings.steer = 'buttons'; saveSettings(); options(); } });
+      }),
       Menu.button('Testar controle', testPad),
       Menu.button('Voltar', title)
     ];
@@ -305,6 +308,7 @@
 
   /* ---------- Corrida ---------- */
   function startRace() {
+    if (settings.steer === 'tilt') Touch.requestTilt();
     Menu.hide();
     if (menuScene) { disposeScene(menuScene); menuScene = null; }
     document.getElementById('loading').classList.remove('hidden');

@@ -5,6 +5,17 @@ var Touch = (function () {
 
   // Qualquer toque nos menus faz o celular virar o "controle" do jogador 1.
   window.addEventListener('touchstart', function () { Input.markTouch(); if (window.Sound) Sound.unlock(); }, { passive: true });
+  // No iPhone o áudio só libera dentro de um toque concluído.
+  window.addEventListener('touchend', function () { if (window.Sound) Sound.unlock(); }, { passive: true });
+
+  /** iOS 13+: a inclinação precisa de permissão, pedida dentro de um toque. */
+  function requestTilt() {
+    var D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === 'function') {
+      return D.requestPermission().then(function (r) { return r === 'granted'; }).catch(function () { return false; });
+    }
+    return Promise.resolve(true);
+  }
 
   function button(cls, label, name) {
     var b = document.createElement('div');
@@ -31,9 +42,12 @@ var Touch = (function () {
     return b;
   }
 
+  var tiltSeen = false;
   function onTilt(e) {
+    if (e.beta !== null && e.beta !== undefined) tiltSeen = true;
     if (!tiltOn || e.beta === null) return;
     var angle = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    if (angle === -90) angle = 270;
     var v = angle === 90 ? e.beta : angle === 270 || angle === -90 ? -e.beta : e.gamma;
     if (tiltZero === null) tiltZero = v;
     var steer = (v - tiltZero) / 22;
@@ -60,6 +74,8 @@ var Touch = (function () {
       hint.textContent = 'Incline o celular para virar';
       layer.appendChild(hint);
       setTimeout(function () { hint.style.opacity = 0; }, 3000);
+      // Sem sensor (ou sem permissão): volta para os botões na tela.
+      setTimeout(function () { if (tiltOn && !tiltSeen && layer) show({ steer: 'buttons' }); }, 2500);
     }
     var right = document.createElement('div');
     right.className = 'tpad right';
@@ -81,5 +97,5 @@ var Touch = (function () {
     if (hud) hud.classList.remove('touch');
   }
 
-  return { show: show, hide: hide, isTouch: isTouch, recenter: function () { tiltZero = null; } };
+  return { show: show, hide: hide, isTouch: isTouch, requestTilt: requestTilt, recenter: function () { tiltZero = null; } };
 })();

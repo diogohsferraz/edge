@@ -43,6 +43,23 @@ os botões de direção por **inclinar o celular**, como um volante. Os menus fu
 Também dá para conectar um controle Bluetooth (inclusive Joy-Con) no celular, e no modo
 2 Jogadores um jogador usa a tela de toque e o outro um controle.
 
+## iPhone e iPad (app de tela inicial)
+
+O iOS não instala APK. No iPhone, o jogo roda como **app web de tela inicial**:
+
+1. Abra o endereço do jogo no **Safari**: https://diogohsferraz.github.io/edge/kart/web/
+   (depois de publicado no GitHub Pages).
+2. Toque em **Compartilhar** (quadrado com seta) → **Adicionar à Tela de Início**.
+3. Abra o **Kart Turbo** pelo ícone: ele roda em tela cheia e, depois da primeira vez,
+   funciona até sem internet.
+
+Os controles são os mesmos do celular Android (botões na tela ou inclinação). Na primeira vez
+que escolher a inclinação, o iPhone pede permissão para usar o sensor de movimento. Controles
+Bluetooth também funcionam (o iOS 16 ou mais novo aceita Joy-Con e Pro Controller; ligue
+**Opções → Botões estilo Nintendo** se o A e o B ficarem trocados).
+
+Um app nativo para a App Store exigiria um Mac com Xcode e uma conta de desenvolvedor Apple.
+
 ## Controles
 
 | Ação | Controle (Bluetooth/USB) | Controle remoto do projetor | Teclado (PC) J1 / J2 |
