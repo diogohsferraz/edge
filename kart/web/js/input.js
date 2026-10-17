@@ -8,11 +8,20 @@
 var Input = (function () {
   var devices = {};
   var listeners = [];
+  var rawListeners = [];
   var lastDevice = 'kb1';
+  // Controles da Nintendo têm A à direita e B embaixo: com a opção ligada, trocamos A/B e X/Y.
+  var nintendo = false;
 
   // Códigos de tecla do Android (KeyEvent.KEYCODE_*)
   var K = { UP: 19, DOWN: 20, LEFT: 21, RIGHT: 22, CENTER: 23, ENTER: 66, BACK: 4, ESC: 111, MENU: 82,
-    A: 96, B: 97, X: 99, Y: 100, L1: 102, R1: 103, L2: 104, R2: 105, START: 108, SELECT: 109, SPACE: 62 };
+    A: 96, B: 97, X: 99, Y: 100, L1: 102, R1: 103, L2: 104, R2: 105, START: 108, SELECT: 109, MODE: 110, SPACE: 62 };
+  var NAMES = { 19: '↑', 20: '↓', 21: '◀', 22: '▶', 23: 'OK', 66: 'Enter', 4: 'Voltar', 96: 'A', 97: 'B', 99: 'X', 100: 'Y',
+    102: 'L / SL', 103: 'R / SR', 104: 'ZL / L2', 105: 'ZR / R2', 106: 'L3', 107: 'R3', 108: '+ / Start', 109: '− / Select', 110: 'Home', 82: 'Menu' };
+  var SWAP = { 96: 97, 97: 96, 99: 100, 100: 99 };
+  function raw(id, label, down) {
+    for (var i = 0; i < rawListeners.length; i++) rawListeners[i]({ device: id, label: label, down: down });
+  }
 
   function device(id, kind) {
     var d = devices[id];
@@ -85,7 +94,7 @@ var Input = (function () {
       case K.RIGHT: return 'right';
       case K.CENTER: case K.ENTER: case K.A: case K.SPACE: return 'ok';
       case K.BACK: case K.B: case K.ESC: return 'back';
-      case K.START: case K.MENU: return 'pause';
+      case K.START: case K.MENU: case K.SELECT: return 'pause';
       default: return null;
     }
   }
@@ -93,6 +102,8 @@ var Input = (function () {
     key: function (devId, code, down, isPad, repeat) {
       var id = 'a' + devId;
       var d = device(id, isPad ? 'gamepad' : 'remote');
+      if (isPad && nintendo && SWAP[code]) code = SWAP[code];
+      if (!repeat) raw(id, (NAMES[code] || 'tecla ' + code) + (isPad ? '' : ' (remoto)'), !!down);
       if (!repeat) { if (down && !d.keys[code]) d.taps[code] = true; d.keys[code] = !!down; }
       if (down) {
         var a = androidAction(code);
@@ -126,7 +137,9 @@ var Input = (function () {
       var d = device(id, 'gamepad');
       var prev = d.buttons || [];
       var b = p.buttons.map(function (x) { return x.pressed || x.value > 0.5; });
+      if (nintendo) { var t0 = b[0]; b[0] = b[1]; b[1] = t0; var t2 = b[2]; b[2] = b[3]; b[3] = t2; }
       d.buttons = b;
+      for (var ri = 0; ri < b.length; ri++) if (b[ri] !== !!prev[ri]) raw(id, ['A', 'B', 'X', 'Y', 'L', 'R', 'ZL', 'ZR', '−', '+', 'L3', 'R3', '↑', '↓', '◀', '▶', 'Home'][ri] || 'botão ' + ri, b[ri]);
       for (var bi = 0; bi < b.length; bi++) if (b[bi] && !prev[bi]) d.taps['b' + bi] = true;
       d.axes = { x: p.axes[0] || 0, y: p.axes[1] || 0, hx: 0, hy: 0, lt: p.buttons[6] ? p.buttons[6].value : 0, rt: p.buttons[7] ? p.buttons[7].value : 0 };
       var map = { 12: 'up', 13: 'down', 14: 'left', 15: 'right', 0: 'ok', 1: 'back', 9: 'pause' };
@@ -190,6 +203,10 @@ var Input = (function () {
 
   return {
     onMenu: function (fn) { listeners.push(fn); },
+    onRaw: function (fn) { rawListeners.push(fn); return function () { rawListeners.splice(rawListeners.indexOf(fn), 1); }; },
+    setNintendo: function (v) { nintendo = !!v; },
+    axes: function (id) { var d = devices[id]; return d ? d.axes : null; },
+    devices: function () { return Object.keys(devices); },
     clearTaps: function () { for (var id in devices) devices[id].taps = {}; },
     controls: controls,
     poll: poll,

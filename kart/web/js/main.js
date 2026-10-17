@@ -9,7 +9,7 @@
   var menuScene = null;
 
   function loadSettings() {
-    var s = { autoAccel: false, quality: 'medium', sound: true, music: true };
+    var s = { autoAccel: false, quality: 'medium', sound: true, music: true, nintendo: false };
     try { var saved = JSON.parse(localStorage.getItem('kart_settings')); if (saved) for (var k in saved) s[k] = saved[k]; } catch (e) { /* sem armazenamento */ }
     return s;
   }
@@ -23,6 +23,7 @@
     resize();
     Sound.setEnabled(settings.sound);
     Sound.setMusic(settings.music);
+    Input.setNintendo(settings.nintendo);
   }
   function resize() { renderer.setSize(window.innerWidth, window.innerHeight, false); }
   window.addEventListener('resize', resize);
@@ -237,10 +238,47 @@
       Menu.selector('Qualidade gráfica', [['low', 'Baixa'], ['medium', 'Média'], ['high', 'Alta']], function () { return settings.quality; }, function (v) { settings.quality = v; saveSettings(); }),
       Menu.selector('Efeitos sonoros', [[true, 'Ligados'], [false, 'Desligados']], function () { return settings.sound; }, function (v) { settings.sound = v; saveSettings(); }),
       Menu.selector('Música', [[true, 'Ligada'], [false, 'Desligada']], function () { return settings.music; }, function (v) { settings.music = v; saveSettings(); }),
+      Menu.selector('Botões estilo Nintendo', [[false, 'Não'], [true, 'Sim (A à direita)']], function () { return settings.nintendo; }, function (v) { settings.nintendo = v; saveSettings(); }),
+      Menu.button('Testar controle', testPad),
       Menu.button('Voltar', title)
     ];
     list.forEach(function (it) { col.appendChild(it.el); s.add([it]); });
-    s.root.appendChild(el('p', 'muted', 'Se o jogo travar no projetor, use a qualidade Baixa.'));
+    s.root.appendChild(el('p', 'muted', 'Se o jogo travar no projetor, use a qualidade Baixa. Com Joy-Con ou Pro Controller do Switch, ligue "Botões estilo Nintendo".'));
+    Menu.show(s);
+  }
+
+  /* Mostra o que cada controle envia: ajuda a configurar Joy-Con e afins. */
+  function testPad() {
+    var lastBack = 0, timer;
+    var s = new Menu.Screen({
+      cls: 'dialog',
+      handle: function (e) {
+        if (e.action === 'back') {
+          var now = Date.now();
+          if (now - lastBack < 1500) { stop(); options(); }
+          lastBack = now;
+        }
+        return true;
+      }
+    });
+    s.root.appendChild(el('h2', '', 'Testar controle'));
+    s.root.appendChild(el('p', 'muted', 'Aperte os botões e mexa os analógicos. Para sair, aperte Voltar (ou B) duas vezes seguidas.'));
+    var axes = el('div', 'pad-axes');
+    var log = el('div', 'pad-log');
+    s.root.appendChild(axes); s.root.appendChild(log);
+    var off = Input.onRaw(function (r) {
+      if (!r.down) return;
+      var line = el('div', '', Input.describe(r.device) + ' [' + r.device + ']: ' + r.label);
+      log.insertBefore(line, log.firstChild);
+      while (log.childNodes.length > 8) log.removeChild(log.lastChild);
+    });
+    timer = setInterval(function () {
+      axes.textContent = Input.devices().filter(function (id) { var a = Input.axes(id); return a && 'x' in a; }).map(function (id) {
+        var a = Input.axes(id), f = function (v) { return (v || 0).toFixed(1); };
+        return id + ': analógico ' + f(a.x) + ', ' + f(a.y) + ' · direcional ' + f(a.hx) + ', ' + f(a.hy) + ' · gatilhos ' + f(a.lt) + ', ' + f(a.rt);
+      }).join('\n') || 'Nenhum analógico detectado ainda.';
+    }, 100);
+    function stop() { off(); clearInterval(timer); }
     Menu.show(s);
   }
 
@@ -249,7 +287,7 @@
     s.root.appendChild(el('h2', '', 'Como jogar'));
     var t = el('div', 'help-grid');
     t.innerHTML =
-      '<div><h3>Controle (Bluetooth/USB)</h3><p><b>Analógico / direcional</b>: virar<br><b>A</b> ou <b>R2</b>: acelerar<br><b>B</b> ou <b>L2</b>: frear e dar ré<br><b>R1</b>: drift<br><b>X</b>, <b>Y</b> ou <b>L1</b>: usar item<br><b>Start</b>: pausar</p></div>' +
+      '<div><h3>Controle (Bluetooth/USB, inclusive do Switch)</h3><p><b>Analógico / direcional</b>: virar<br><b>A</b> ou <b>ZR</b>: acelerar<br><b>B</b> ou <b>ZL</b>: frear e dar ré<br><b>R</b> ou <b>SR</b>: drift<br><b>X</b>, <b>Y</b>, <b>L</b> ou <b>SL</b>: usar item<br><b>+</b> ou <b>Start</b>: pausar</p></div>' +
       '<div><h3>Controle remoto do projetor</h3><p><b>◀ ▶</b>: virar<br>Acelera sozinho<br><b>▼</b>: frear<br><b>▲</b> (segurar): drift<br><b>OK</b>: usar item<br><b>Voltar</b>: pausar</p></div>' +
       '<div><h3>Drift com turbo</h3><p>Numa curva, segure o botão de drift virando. As faíscas ficam <b style="color:#3fa9ff">azuis</b> e depois <b style="color:#ff8a2a">laranja</b>. Solte para ganhar turbo.</p></div>' +
       '<div><h3>Itens</h3><p>⚡ Nitro: turbo<br>🛢️ Óleo: deixa uma mancha atrás<br>💣 Bomba: rola para a frente e quica nas barreiras<br>🚀 Míssil: persegue quem está à sua frente</p></div>' +

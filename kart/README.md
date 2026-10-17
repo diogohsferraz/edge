@@ -36,6 +36,22 @@ Se o projetor não tiver gerenciador de arquivos, instale um pela loja do aparel
 | Usar item | X, Y ou L1 | OK | X / E |
 | Pausar | Start | Voltar | P / T |
 
+### Controles do Nintendo Switch (Joy-Con e Pro Controller)
+
+1. No projetor, abra **Configurações → Bluetooth** (ou *Controle remoto e acessórios*) e procure dispositivos.
+2. No Joy-Con, segure o botãozinho redondo de sincronizar (na lateral, entre SL e SR) até as luzes
+   correrem. No Pro Controller, o botão fica em cima, ao lado do USB-C.
+3. No jogo, abra **Opções → Botões estilo Nintendo → Sim**, para o A (à direita) acelerar e o B frear.
+4. Use **Opções → Testar controle** para ver o que o projetor recebe de cada botão.
+
+Mapeamento: **A/ZR** acelera, **B/ZL** freia, **R/SR** faz drift, **X/Y/L/SL** usa item e **+** pausa.
+Com dois Joy-Cons, cada jogador pode usar um.
+
+O suporte do Android aos controles da Nintendo depende da versão do sistema. No Android 12
+ou mais novo, Joy-Con e Pro Controller funcionam bem. Em versões mais antigas, o Pro Controller
+costuma funcionar, mas um Joy-Con sozinho pode parear com o analógico "deitado" (virar
+vira subir e descer). Nesse caso, a tela *Testar controle* mostra o que chega, e dá para ajustar.
+
 Para jogar em dois: em **2 Jogadores**, o segundo jogador aperta OK/A no próprio controle.
 Cada jogador precisa de um dispositivo (por exemplo, um controle Bluetooth e o controle
 remoto, ou dois controles).

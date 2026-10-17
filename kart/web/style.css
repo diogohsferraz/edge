@@ -113,3 +113,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e1a; col
   .char-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .help-grid { grid-template-columns: 1fr; }
 }
+
+.pad-axes { white-space: pre-line; font-family: monospace; font-size: clamp(12px, 2vh, 16px); color: var(--accent); text-align: center; }
+.pad-log { display: flex; flex-direction: column; gap: 4px; min-height: 30vh; width: min(640px, 86vw); font-size: clamp(15px, 2.4vh, 22px); }
+.pad-log div { background: var(--panel-2); border-radius: 8px; padding: 6px 12px; }
+.pad-log div:first-child { border: 2px solid var(--accent); }
