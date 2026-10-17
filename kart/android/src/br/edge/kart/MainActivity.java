@@ -13,6 +13,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import java.util.HashSet;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
@@ -25,6 +26,15 @@ public class MainActivity extends Activity {
     // Último dispositivo usado: o botão Voltar do sistema é atribuído a ele.
     private int lastDevice = 0;
     private boolean lastPad = false;
+    private final HashSet<Integer> announced = new HashSet<Integer>();
+
+    /** Envia uma vez o nome e os ids de cada dispositivo (para reconhecer Joy-Con esquerdo/direito). */
+    private void announce(InputDevice dev, int id) {
+        if (dev == null || announced.contains(id)) return;
+        announced.add(id);
+        String name = dev.getName() == null ? "" : dev.getName().replace("\\", "").replace("'", "");
+        js("window.NativeInput&&NativeInput.info(" + id + ",'" + name + "'," + dev.getVendorId() + "," + dev.getProductId() + ")");
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -93,6 +103,7 @@ public class MainActivity extends Activity {
         int action = e.getAction();
         if (action != KeyEvent.ACTION_DOWN && action != KeyEvent.ACTION_UP) return true;
         boolean pad = isPad(e.getDevice(), e.getSource());
+        announce(e.getDevice(), e.getDeviceId());
         lastDevice = e.getDeviceId();
         lastPad = pad;
         js("window.NativeInput&&NativeInput.key(" + e.getDeviceId() + "," + code + ","
@@ -109,6 +120,7 @@ public class MainActivity extends Activity {
         int src = e.getSource();
         if ((src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
             && e.getAction() == MotionEvent.ACTION_MOVE) {
+            announce(e.getDevice(), e.getDeviceId());
             float lt = Math.max(axis(e, MotionEvent.AXIS_LTRIGGER), axis(e, MotionEvent.AXIS_BRAKE));
             float rt = Math.max(axis(e, MotionEvent.AXIS_RTRIGGER), axis(e, MotionEvent.AXIS_GAS));
             js("window.NativeInput&&NativeInput.axis(" + e.getDeviceId() + ","

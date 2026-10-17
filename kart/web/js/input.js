@@ -19,13 +19,49 @@ var Input = (function () {
   var NAMES = { 19: '↑', 20: '↓', 21: '◀', 22: '▶', 23: 'OK', 66: 'Enter', 4: 'Voltar', 96: 'A', 97: 'B', 99: 'X', 100: 'Y',
     102: 'L / SL', 103: 'R / SR', 104: 'ZL / L2', 105: 'ZR / R2', 106: 'L3', 107: 'R3', 108: '+ / Start', 109: '− / Select', 110: 'Home', 82: 'Menu' };
   var SWAP = { 96: 97, 97: 96, 99: 100, 100: 99 };
+
+  /*
+   * Joy-Con. O Android mostra cada Joy-Con como um controle separado.
+   *  - 'pair':   Juntos. Esquerdo + direito formam um controle só (um jogador).
+   *  - 'single': Separados na horizontal. Cada Joy-Con é um jogador; giramos analógico e botões.
+   * Os códigos do Android são por posição: 96 = baixo, 97 = direita, 99 = cima, 100 = esquerda.
+   */
+  var joyMode = 'pair';
+  var links = {}; // id físico -> id do parceiro
+  var ROT = {
+    L: { 19: 100, 20: 97, 21: 96, 22: 99 },      // Joy-Con esquerdo deitado: o direcional vira A/B/X/Y
+    R: { 99: 97, 97: 96, 96: 100, 100: 99 }      // Joy-Con direito deitado
+  };
+  function joySide(name, vendor, product) {
+    var n = String(name || '').toLowerCase();
+    if (product === 0x2006 || /joy-?con.*\(l\)|left joy-?con|joy-?con l\b/.test(n)) return 'L';
+    if (product === 0x2007 || /joy-?con.*\(r\)|right joy-?con|joy-?con r\b/.test(n)) return 'R';
+    return null;
+  }
+  function relink() {
+    links = {};
+    if (joyMode !== 'pair') return;
+    var Ls = [], Rs = [];
+    Object.keys(devices).sort(function (a, b) { return devices[a].seen - devices[b].seen; }).forEach(function (id) {
+      var d = devices[id];
+      if (d.side === 'L') Ls.push(id); else if (d.side === 'R') Rs.push(id);
+    });
+    for (var i = 0; i < Math.min(Ls.length, Rs.length); i++) { links[Ls[i]] = Rs[i]; links[Rs[i]] = Ls[i]; }
+  }
+  /** Id usado pelo jogo: num par de Joy-Con, o id do esquerdo representa os dois. */
+  function canonical(id) {
+    var p = links[id];
+    if (!p) return id;
+    return devices[id].side === 'L' ? id : p;
+  }
+  var seenCounter = 0;
   function raw(id, label, down) {
     for (var i = 0; i < rawListeners.length; i++) rawListeners[i]({ device: id, label: label, down: down });
   }
 
   function device(id, kind) {
     var d = devices[id];
-    if (!d) d = devices[id] = { id: id, kind: kind || 'keyboard', keys: {}, taps: {}, axes: {}, menuAxis: { x: 0, y: 0 } };
+    if (!d) d = devices[id] = { id: id, kind: kind || 'keyboard', keys: {}, taps: {}, axes: {}, menuAxis: { x: 0, y: 0 }, seen: ++seenCounter };
     if (kind === 'gamepad') d.kind = 'gamepad';
     return d;
   }
@@ -98,26 +134,52 @@ var Input = (function () {
       default: return null;
     }
   }
+  function setKey(id, d, code, down, isPad, repeat) {
+    // Controles da Nintendo (fabricante 057e) usam o padrão da Nintendo automaticamente.
+    if (isPad && (nintendo || d.vendor === 0x057e) && SWAP[code]) code = SWAP[code];
+    if (!repeat) raw(id, (NAMES[code] || 'tecla ' + code) + (isPad ? '' : ' (remoto)'), !!down);
+    if (!repeat) { if (down && !d.keys[code]) d.taps[code] = true; d.keys[code] = !!down; }
+    if (down) {
+      var a = androidAction(code);
+      if (a && (!repeat || ['up', 'down', 'left', 'right'].indexOf(a) >= 0)) emit(canonical(id), a);
+    }
+  }
   window.NativeInput = {
+    /** Nome e ids do dispositivo, enviados pela MainActivity no primeiro evento de cada um. */
+    info: function (devId, name, vendor, product) {
+      var d = device('a' + devId);
+      d.name = name; d.vendor = vendor; d.product = product;
+      d.side = joySide(name, vendor, product);
+      if (d.side) { d.kind = 'gamepad'; relink(); }
+    },
     key: function (devId, code, down, isPad, repeat) {
       var id = 'a' + devId;
       var d = device(id, isPad ? 'gamepad' : 'remote');
-      if (isPad && nintendo && SWAP[code]) code = SWAP[code];
-      if (!repeat) raw(id, (NAMES[code] || 'tecla ' + code) + (isPad ? '' : ' (remoto)'), !!down);
-      if (!repeat) { if (down && !d.keys[code]) d.taps[code] = true; d.keys[code] = !!down; }
-      if (down) {
-        var a = androidAction(code);
-        if (a && (!repeat || ['up', 'down', 'left', 'right'].indexOf(a) >= 0)) emit(id, a);
-      }
+      if (joyMode === 'single' && d.side && ROT[d.side][code]) code = ROT[d.side][code];
+      setKey(id, d, code, down, isPad, repeat);
       return true;
     },
     axis: function (devId, x, y, hx, hy, lt, rt) {
       var id = 'a' + devId;
       var d = device(id, 'gamepad');
+      if (joyMode === 'single' && d.side) {
+        // Deitado: o eixo vertical do analógico vira o horizontal.
+        var nx = d.side === 'L' ? y : -y, ny = d.side === 'L' ? -x : x;
+        x = nx; y = ny;
+        // No esquerdo, o direcional (hat) são os botões de ação.
+        if (d.side === 'L') {
+          var want = { 99: hx > 0.5, 97: hy > 0.5, 96: hx < -0.5, 100: hy < -0.5 };
+          for (var c in want) if (!!d.keys[ROTATED_HAT_MARK + c] !== want[c]) { d.keys[ROTATED_HAT_MARK + c] = want[c]; setKey(id, d, +c, want[c], true, false); }
+          hx = 0; hy = 0;
+        } else {
+          var t = hx; hx = -hy; hy = t;
+        }
+      }
       d.axes = { x: x, y: y, hx: hx, hy: hy, lt: lt, rt: rt };
-      stickToMenu(id, d, Math.abs(hx) > 0.5 ? hx : x, Math.abs(hy) > 0.5 ? hy : y);
+      stickToMenu(canonical(id), d, Math.abs(hx) > 0.5 ? hx : x, Math.abs(hy) > 0.5 ? hy : y);
     }
   };
+  var ROTATED_HAT_MARK = 'hat';
 
   function stickToMenu(id, d, x, y) {
     var mx = x > 0.6 ? 1 : x < -0.6 ? -1 : 0;
@@ -160,6 +222,19 @@ var Input = (function () {
     for (var key in d.keys) k[key] = d.keys[key];
     for (key in d.taps) k[key] = true;
     d.taps = {};
+    // Par de Joy-Con: junta botões e usa o analógico que estiver mais inclinado.
+    var partner = links[id] && devices[links[id]];
+    if (partner) {
+      for (key in partner.keys) if (partner.keys[key]) k[key] = true;
+      for (key in partner.taps) k[key] = true;
+      partner.taps = {};
+      var pa = partner.axes || {};
+      a = {
+        x: Math.abs(pa.x || 0) > Math.abs(a.x || 0) ? pa.x : a.x, y: a.y,
+        hx: Math.abs(pa.hx || 0) > Math.abs(a.hx || 0) ? pa.hx : a.hx, hy: a.hy,
+        lt: Math.max(a.lt || 0, pa.lt || 0), rt: Math.max(a.rt || 0, pa.rt || 0)
+      };
+    }
     if (id === 'touch') {
       // Controles na tela do celular (ver touch.js). Acelera sozinho.
       c.steer = d.tilt !== undefined && d.tilt !== null ? d.tilt : (k.right ? 1 : 0) - (k.left ? 1 : 0);
@@ -206,7 +281,9 @@ var Input = (function () {
     if (id === 'kb2') return 'Teclado (WASD)';
     if (id === 'touch') return 'Tela de toque';
     var d = devices[id];
-    if (d && d.kind === 'gamepad') return 'Controle';
+    if (d && links[id]) return 'Par de Joy-Con';
+    if (d && d.side) return 'Joy-Con ' + (d.side === 'L' ? 'esquerdo' : 'direito') + (joyMode === 'single' ? ' (deitado)' : '');
+    if (d && d.kind === 'gamepad') return d.name ? String(d.name) : 'Controle';
     return 'Controle remoto';
   }
 
@@ -214,6 +291,13 @@ var Input = (function () {
     onMenu: function (fn) { listeners.push(fn); },
     onRaw: function (fn) { rawListeners.push(fn); return function () { rawListeners.splice(rawListeners.indexOf(fn), 1); }; },
     setNintendo: function (v) { nintendo = !!v; },
+    setJoyMode: function (m) { joyMode = m === 'single' ? 'single' : 'pair'; for (var id in devices) devices[id].keys = {}; relink(); },
+    joyCons: function () {
+      return Object.keys(devices).filter(function (id) { return devices[id].side; }).map(function (id) {
+        return { id: id, side: devices[id].side, partner: links[id] || null, name: devices[id].name };
+      });
+    },
+    canonical: canonical,
     axes: function (id) { var d = devices[id]; return d ? d.axes : null; },
     devices: function () { return Object.keys(devices); },
     clearTaps: function () { for (var id in devices) devices[id].taps = {}; },

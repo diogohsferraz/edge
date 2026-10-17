@@ -9,8 +9,8 @@ if [ -z "${ANDROID_HOME:-}" ]; then
 fi
 BT="$ANDROID_HOME/build-tools/35.0.0-rc4"
 JAR="$ANDROID_HOME/platforms/android-35/android.jar"
-VERSION_CODE="${VERSION_CODE:-5}"
-VERSION_NAME="${VERSION_NAME:-2.3}"
+VERSION_CODE="${VERSION_CODE:-6}"
+VERSION_NAME="${VERSION_NAME:-2.4}"
 B=build
 rm -rf "$B"; mkdir -p "$B/gen" "$B/classes" "$B/assets"
 cp -r ../web "$B/assets/web"

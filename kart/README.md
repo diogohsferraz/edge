@@ -76,11 +76,18 @@ Um app nativo para a App Store exigiria um Mac com Xcode e uma conta de desenvol
 1. No projetor, abra **Configurações → Bluetooth** (ou *Controle remoto e acessórios*) e procure dispositivos.
 2. No Joy-Con, segure o botãozinho redondo de sincronizar (na lateral, entre SL e SR) até as luzes
    correrem. No Pro Controller, o botão fica em cima, ao lado do USB-C.
-3. No jogo, abra **Opções → Botões estilo Nintendo → Sim**, para o A (à direita) acelerar e o B frear.
-4. Use **Opções → Testar controle** para ver o que o projetor recebe de cada botão.
+3. Escolha o modo em **Opções → Joy-Con**:
+   - **Juntos (1 jogador)**: o Joy-Con esquerdo e o direito funcionam como um controle só.
+     Analógico vira, **A/ZR** acelera, **B/ZL** freia, **R** faz drift, **X/Y/L** usa item e **+/−** pausa.
+     Com quatro Joy-Cons, os pares se formam na ordem em que foram conectados (esquerdo e direito
+     do jogador 1 primeiro).
+   - **Separados, deitados (1 por jogador)**: cada Joy-Con é o controle de um jogador, segurado na
+     horizontal. O jogo gira o analógico e os botões: o botão da direita acelera, o de baixo freia,
+     **SR** faz drift, **SL** usa item e **+/−** pausa. Ideal para 2 jogadores com um par de Joy-Con.
+4. O A e o B já seguem o padrão da Nintendo automaticamente. Use **Opções → Testar controle** para
+   ver o que o projetor recebe de cada botão e quais Joy-Cons estão em par.
 
-Mapeamento: **A/ZR** acelera, **B/ZL** freia, **R/SR** faz drift, **X/Y/L/SL** usa item e **+** pausa.
-Com dois Joy-Cons, cada jogador pode usar um.
+Pro Controller e controles conjugados no grip com cabo funcionam como um controle comum.
 
 O suporte do Android aos controles da Nintendo depende da versão do sistema. No Android 12
 ou mais novo, Joy-Con e Pro Controller funcionam bem. Em versões mais antigas, o Pro Controller
