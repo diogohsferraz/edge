@@ -9,7 +9,7 @@
   var menuScene = null;
 
   function loadSettings() {
-    var s = { autoAccel: false, quality: 'medium', sound: true, music: true, nintendo: false };
+    var s = { autoAccel: false, quality: 'medium', sound: true, music: true, nintendo: false, steer: 'buttons' };
     try { var saved = JSON.parse(localStorage.getItem('kart_settings')); if (saved) for (var k in saved) s[k] = saved[k]; } catch (e) { /* sem armazenamento */ }
     return s;
   }
@@ -239,6 +239,7 @@
       Menu.selector('Efeitos sonoros', [[true, 'Ligados'], [false, 'Desligados']], function () { return settings.sound; }, function (v) { settings.sound = v; saveSettings(); }),
       Menu.selector('Música', [[true, 'Ligada'], [false, 'Desligada']], function () { return settings.music; }, function (v) { settings.music = v; saveSettings(); }),
       Menu.selector('Botões estilo Nintendo', [[false, 'Não'], [true, 'Sim (A à direita)']], function () { return settings.nintendo; }, function (v) { settings.nintendo = v; saveSettings(); }),
+      Menu.selector('Direção no celular', [['buttons', 'Botões na tela'], ['tilt', 'Inclinar o celular']], function () { return settings.steer; }, function (v) { settings.steer = v; saveSettings(); }),
       Menu.button('Testar controle', testPad),
       Menu.button('Voltar', title)
     ];
@@ -292,6 +293,7 @@
       '<div><h3>Drift com turbo</h3><p>Numa curva, segure o drift virando. As faíscas ficam <b style="color:#3fa9ff">azuis</b>, depois <b style="color:#ff8a2a">laranja</b> e por fim <b style="color:#d25cff">roxas</b>. Solte para ganhar turbo: quanto mais longo o drift, maior o turbo.</p></div>' +
       '<div><h3>Itens (a roleta depende da sua posição)</h3><p>⚡ Nitro (ou ×3) · 🛢️ Óleo · 💣 Bomba que quica · 🚀 Míssil que persegue quem está à frente · 🛡️ Escudo contra um golpe · 🔥 Supercarga: invencível, mais rápido e derruba quem encostar</p></div>' +
       '<div><h3>Moedas, rampas e planador</h3><p>Cada moeda aumenta a velocidade máxima (até 10; perde 3 ao ser atingido). Nas rampas, aperte o drift no ar para uma manobra e ganhe turbo ao pousar. A rampa azul abre o planador. Placas laranja dão turbo.</p></div>' +
+      '<div><h3>Celular</h3><p>Acelera sozinho. Botões na tela: <b>◀ ▶</b> viram (ou incline o celular, em Opções), <b>DRIFT</b> (segurar), <b>ITEM</b>, <b>FREIO</b> e <b>❚❚</b> para pausar. Toque nos menus para escolher.</p></div>' +
       '<div><h3>Largada</h3><p>Acelere quando aparecer o <b>1</b> para largar com turbo. Acelerar cedo demais não dá turbo.</p></div>' +
       '<div><h3>Teclado (PC)</h3><p>J1: setas, Espaço (drift), X (item)<br>J2: WASD, Q (drift), E (item)</p></div>';
     s.root.appendChild(t);
@@ -312,11 +314,13 @@
         humans: session.players.map(function (p) { return { deviceId: p.deviceId, charId: p.charId }; })
       });
       race.onEnd = showResults;
+      if (session.players.some(function (p) { return p.deviceId === 'touch'; })) Touch.show({ steer: settings.steer });
       document.getElementById('loading').classList.add('hidden');
     }, 30);
   }
 
   function endRace() {
+    Touch.hide();
     if (race) { race.dispose(); race = null; }
   }
 
@@ -349,6 +353,7 @@
   });
 
   function showResults(results) {
+    Touch.hide();
     var s = new Menu.Screen({ cls: 'results', back: function () { endRace(); title(); } });
     s.root.appendChild(el('h2', '', 'Resultado — ' + TRACK_DEFS[session.trackIndex].name));
     var table = el('div', 'result-list');

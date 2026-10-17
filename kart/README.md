@@ -1,8 +1,8 @@
 # Kart Turbo
 
 Jogo de kart 3D original (personagens, pistas e visual próprios) para Android, feito
-para rodar no projetor **Wanbo Cube 2** e em outras TVs/projetores Android. Também roda
-no navegador do PC.
+para rodar no projetor **Wanbo Cube 2**, em outras TVs/projetores Android e em **celulares
+Android** (com controles na tela). Também roda no navegador do PC.
 
 - **5 pistas**: Circuito Coqueiral (praia), Vale Neblina (montanha, com planador), Cidade Neon
   (noite), Dunas do Sol (deserto, cheia de rampas) e Pico Nevado (neve, com planador)
@@ -29,6 +29,19 @@ no navegador do PC.
 Se o projetor não tiver gerenciador de arquivos, instale um pela loja do aparelho
 (por exemplo *File Commander* ou *X-plore*) ou envie o APK pela rede com o app
 *Send Files to TV*.
+
+## Instalar no celular Android
+
+1. Envie `KartTurbo.apk` para o celular (WhatsApp, Google Drive, cabo USB…) e toque no arquivo.
+2. Permita "instalar apps desconhecidos" para o app usado para abrir o arquivo, quando o Android pedir.
+3. Abra **Kart Turbo** e jogue com o celular deitado.
+
+No celular o kart **acelera sozinho**. Na tela ficam os botões **◀ ▶** (virar), **DRIFT**
+(segurar), **ITEM**, **FREIO** e **❚❚** (pausa). Em **Opções → Direção no celular** dá para trocar
+os botões de direção por **inclinar o celular**, como um volante. Os menus funcionam por toque.
+
+Também dá para conectar um controle Bluetooth (inclusive Joy-Con) no celular, e no modo
+2 Jogadores um jogador usa a tela de toque e o outro um controle.
 
 ## Controles
 

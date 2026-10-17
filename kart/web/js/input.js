@@ -160,7 +160,15 @@ var Input = (function () {
     for (var key in d.keys) k[key] = d.keys[key];
     for (key in d.taps) k[key] = true;
     d.taps = {};
-    if (id === 'kb1' || id === 'kb2') {
+    if (id === 'touch') {
+      // Controles na tela do celular (ver touch.js). Acelera sozinho.
+      c.steer = d.tilt !== undefined && d.tilt !== null ? d.tilt : (k.right ? 1 : 0) - (k.left ? 1 : 0);
+      c.brake = !!k.brake;
+      c.drift = !!k.drift;
+      c.item = !!k.item;
+      c.accel = !c.brake;
+      return c;
+    } else if (id === 'kb1' || id === 'kb2') {
       var m = KB[id];
       c.steer = (k[m.right] ? 1 : 0) - (k[m.left] ? 1 : 0);
       c.accel = !!k[m.up];
@@ -196,6 +204,7 @@ var Input = (function () {
   function describe(id) {
     if (id === 'kb1') return 'Teclado (setas)';
     if (id === 'kb2') return 'Teclado (WASD)';
+    if (id === 'touch') return 'Tela de toque';
     var d = devices[id];
     if (d && d.kind === 'gamepad') return 'Controle';
     return 'Controle remoto';
@@ -212,6 +221,16 @@ var Input = (function () {
     poll: poll,
     describe: describe,
     last: function () { return lastDevice; },
+    /** Dispositivo virtual da tela de toque: botões viram teclas com nomes. */
+    touch: function (name, down) {
+      var d = device('touch', 'touch');
+      if (down && !d.keys[name]) d.taps[name] = true;
+      d.keys[name] = !!down;
+      lastDevice = 'touch';
+    },
+    setTilt: function (v) { device('touch', 'touch').tilt = v; },
+    markTouch: function () { lastDevice = 'touch'; },
+    emit: emit,
     kind: function (id) { var d = devices[id]; return d ? d.kind : 'keyboard'; }
   };
 })();

@@ -128,3 +128,37 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e1a; col
 .chars .char { padding: 1vh 10px; gap: .4vh; }
 .chars .helmet { width: 6.5vh; height: 6.5vh; }
 .chars .stat i { height: 4px; }
+
+/* Controles de toque (celular) */
+#touch { position: fixed; inset: 0; z-index: 15; pointer-events: none; touch-action: none; }
+.tpad { position: absolute; bottom: 4vh; display: flex; gap: 3vh; pointer-events: none; }
+.tpad.left { left: 3vw; }
+.tpad.right { right: 3vw; flex-direction: row; align-items: flex-end; }
+.tbtn { pointer-events: auto; touch-action: none; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: rgba(15, 20, 40, .45); border: 3px solid rgba(255, 255, 255, .7); color: #fff; font-weight: 900;
+  text-shadow: 0 2px 0 rgba(0,0,0,.5); -webkit-tap-highlight-color: transparent; user-select: none; }
+.tbtn.on { background: rgba(255, 210, 63, .55); transform: scale(.94); }
+.tbtn.dir { width: 21vh; height: 21vh; font-size: 9vh; }
+.tbtn.drift { width: 24vh; height: 24vh; font-size: 4.4vh; background: rgba(210, 92, 255, .4); }
+.tbtn.item { width: 16vh; height: 16vh; font-size: 3.4vh; margin-bottom: 20vh; background: rgba(255, 138, 42, .4); }
+.tbtn.brake { width: 14vh; height: 14vh; font-size: 2.8vh; }
+.tbtn.pause { position: absolute; top: 9vh; right: 2.5vw; width: 9vh; height: 9vh; font-size: 3.4vh; border-radius: 14px; }
+.thint { position: absolute; left: 0; right: 0; top: 30vh; text-align: center; font-size: 4vh; font-weight: 800; text-shadow: 0 3px 0 #000; transition: opacity .6s; }
+/* Abre espaço para os botões: minimapa e moedas sobem, posição vai para o alto */
+#hud.touch .hud-map { bottom: auto; top: 10vh; left: 2vw; width: 18vh; height: 18vh; }
+#hud.touch .hud-coins { bottom: auto; top: 30vh; }
+#hud.touch .hud-pos { bottom: auto; top: 17vh; right: 3vw; font-size: clamp(40px, 10vh, 90px); }
+#hud.touch .hud-view:not(.full) .hud-map, #hud.touch .hud-view:not(.full) .hud-coins { display: none; }
+
+/* Telas baixas (celular deitado) */
+@media (max-height: 520px) {
+  #ui { align-items: flex-start; padding: 2vh 2vw; }
+  .dialog, .results, .tracks, .chars { padding: 2.5vh 2.5vw; border-radius: 16px; }
+  .screen { gap: 1.6vh; }
+  .chars .stat { display: none; }
+  .chars .char { flex-direction: row; justify-content: flex-start; padding: 1.2vh 10px; gap: 10px; }
+  .chars .helmet { width: 8vh; height: 8vh; flex: none; }
+  .chars .cname { text-align: left; }
+  .logo { font-size: 15vh; }
+  .btn { padding: 1.2vh 20px; }
+}
