@@ -8,9 +8,9 @@ if [ -z "${ANDROID_HOME:-}" ]; then
   exec docker run --rm -u "$(id -u):$(id -g)" -v "$KART":/kart -w /kart/android cimg/android:2024.10.1 bash build.sh
 fi
 BT="$ANDROID_HOME/build-tools/35.0.0-rc4"
-JAR="$ANDROID_HOME/platforms/android-33/android.jar"
-VERSION_CODE="${VERSION_CODE:-4}"
-VERSION_NAME="${VERSION_NAME:-2.2}"
+JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+VERSION_CODE="${VERSION_CODE:-5}"
+VERSION_NAME="${VERSION_NAME:-2.3}"
 B=build
 rm -rf "$B"; mkdir -p "$B/gen" "$B/classes" "$B/assets"
 cp -r ../web "$B/assets/web"
@@ -20,7 +20,7 @@ cp -r ../web "$B/assets/web"
 
 "$BT/aapt2" compile --dir res -o "$B/res.zip"
 "$BT/aapt2" link -o "$B/base.apk" -I "$JAR" --manifest AndroidManifest.xml -A "$B/assets" --java "$B/gen" \
-  --min-sdk-version 21 --target-sdk-version 33 --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" "$B/res.zip"
+  --min-sdk-version 21 --target-sdk-version 36 --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" "$B/res.zip"
 javac -nowarn -Xlint:-options -source 8 -target 8 -bootclasspath "$JAR" -classpath "$JAR" -d "$B/classes" \
   "$B/gen/br/edge/kart/R.java" src/br/edge/kart/MainActivity.java
 "$BT/d8" --release --lib "$JAR" --min-api 21 --output "$B" $(find "$B/classes" -name '*.class')

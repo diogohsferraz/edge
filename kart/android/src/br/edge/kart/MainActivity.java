@@ -13,6 +13,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 /**
  * Abre o jogo (HTML + WebGL) em tela cheia e repassa controle, controle remoto
@@ -20,6 +22,9 @@ import android.webkit.WebViewClient;
  */
 public class MainActivity extends Activity {
     private WebView web;
+    // Último dispositivo usado: o botão Voltar do sistema é atribuído a ele.
+    private int lastDevice = 0;
+    private boolean lastPad = false;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -39,6 +44,18 @@ public class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl("file:///android_asset/web/index.html");
         hideSystemUi();
+        // Android 13+: o Voltar chega por este callback (gesto ou tecla), e não como tecla.
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT, new OnBackInvokedCallback() {
+                    @Override
+                    public void onBackInvoked() {
+                        String args = lastDevice + "," + KeyEvent.KEYCODE_BACK + ",";
+                        js("window.NativeInput&&(NativeInput.key(" + args + "true," + lastPad + ",false),NativeInput.key("
+                            + args + "false," + lastPad + ",false))");
+                    }
+                });
+        }
     }
 
     private class Bridge {
@@ -76,6 +93,8 @@ public class MainActivity extends Activity {
         int action = e.getAction();
         if (action != KeyEvent.ACTION_DOWN && action != KeyEvent.ACTION_UP) return true;
         boolean pad = isPad(e.getDevice(), e.getSource());
+        lastDevice = e.getDeviceId();
+        lastPad = pad;
         js("window.NativeInput&&NativeInput.key(" + e.getDeviceId() + "," + code + ","
             + (action == KeyEvent.ACTION_DOWN) + "," + pad + "," + (e.getRepeatCount() > 0) + ")");
         return true;
