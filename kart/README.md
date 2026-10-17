@@ -4,13 +4,18 @@ Jogo de kart 3D original (personagens, pistas e visual próprios) para Android, 
 para rodar no projetor **Wanbo Cube 2** e em outras TVs/projetores Android. Também roda
 no navegador do PC.
 
-- 3 pistas: **Circuito Coqueiral** (praia), **Vale Neblina** (montanha) e **Cidade Neon** (noite)
-- 8 pilotos com atributos diferentes (velocidade, aceleração e curvas)
-- Corrida de 3 voltas contra a CPU, com 3 dificuldades
-- **Drift com turbo** (faíscas azuis e laranja) e turbo de largada
-- Itens: ⚡ Nitro, 🛢️ Óleo, 💣 Bomba (quica nas barreiras) e 🚀 Míssil (persegue quem está à frente)
+- **5 pistas**: Circuito Coqueiral (praia), Vale Neblina (montanha, com planador), Cidade Neon
+  (noite), Dunas do Sol (deserto, cheia de rampas) e Pico Nevado (neve, com planador)
+- **12 pilotos** com atributos diferentes (velocidade, aceleração e curvas)
+- Corrida de 3 voltas contra 7 adversários da CPU, nas classes **50cc, 100cc e 150cc**
+- **Drift com 3 níveis de turbo** (faíscas azuis, laranja e roxas) e turbo de largada
+- **Roleta de itens por posição**: ⚡ Nitro e Nitro ×3, 🛢️ Óleo, 💣 Bomba que quica, 🚀 Míssil que
+  persegue quem está à frente, 🛡️ Escudo e 🔥 Supercarga
+- **Moedas**: cada uma aumenta a velocidade máxima (até 10); ser atingido faz perder 3
+- **Rampas com manobra no ar** (turbo ao pousar), **rampas de planador** e **placas de turbo**
 - **2 jogadores em tela dividida**, um controle para cada
-- Funciona com controle Bluetooth/USB e com o **controle remoto do projetor** (aceleração automática)
+- Funciona com controle Bluetooth/USB (inclusive Joy-Con e Pro Controller do Switch) e com o
+  **controle remoto do projetor** (aceleração automática)
 
 ## Instalar no projetor
 
@@ -32,7 +37,7 @@ Se o projetor não tiver gerenciador de arquivos, instale um pela loja do aparel
 | Virar | Analógico ou direcional | ◀ ▶ | Setas / A D |
 | Acelerar | A ou R2 | automático | ↑ / W |
 | Frear / ré | B ou L2 | ▼ | ↓ / S |
-| Drift | R1 (segurar) | ▲ (segurar) | Espaço / Q |
+| Drift / manobra no ar | R1 (segurar) | ▲ (segurar) | Espaço / Q |
 | Usar item | X, Y ou L1 | OK | X / E |
 | Pausar | Start | Voltar | P / T |
 

@@ -1,14 +1,19 @@
 /* Uma corrida: cena, karts, itens, câmeras, HUD e regras. */
 var ITEMS = {
   nitro: { name: 'Nitro', icon: '⚡' },
+  nitro3: { name: 'Nitro triplo', icon: '⚡' },
   oil: { name: 'Óleo', icon: '🛢️' },
   bomb: { name: 'Bomba', icon: '💣' },
-  missile: { name: 'Míssil', icon: '🚀' }
+  missile: { name: 'Míssil', icon: '🚀' },
+  shield: { name: 'Escudo', icon: '🛡️' },
+  super: { name: 'Supercarga', icon: '🔥' }
 };
+var ITEM_KEYS = Object.keys(ITEMS);
+/* Roleta por posição: quem está na frente recebe itens de defesa; quem está atrás, itens para recuperar. */
 var ITEM_ODDS = [
-  { oil: 45, bomb: 40, nitro: 15, missile: 0 },
-  { oil: 25, bomb: 30, nitro: 25, missile: 20 },
-  { oil: 10, bomb: 20, nitro: 40, missile: 30 }
+  { oil: 35, bomb: 30, shield: 25, nitro: 10 },
+  { oil: 15, bomb: 25, nitro: 20, nitro3: 10, missile: 20, shield: 10 },
+  { bomb: 10, nitro: 15, nitro3: 30, missile: 25, super: 20 }
 ];
 var LAPS = 3;
 
@@ -60,10 +65,22 @@ Race.prototype.build = function () {
     return { x: sp.x, z: sp.z, mesh: m, respawn: 0 };
   });
 
+  // Moedas
+  var coinGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.16, 12);
+  coinGeo.rotateZ(Math.PI / 2);
+  var coinMat = new THREE.MeshLambertMaterial({ color: 0xffc928, emissive: 0x6b4a00 });
+  this.coins = this.track.coinSpots.map(function (sp) {
+    var m = new THREE.Mesh(coinGeo, coinMat);
+    m.position.set(sp.x, sp.y + 1.0, sp.z);
+    sc.add(m);
+    return { x: sp.x, z: sp.z, mesh: m, respawn: 0 };
+  });
+  this.features = this.track.features;
+
   // Karts: humanos largam no meio do grid
   var humans = this.opts.humans;
   var used = humans.map(function (h) { return h.charId; });
-  var cpu = CHARACTERS.filter(function (c) { return used.indexOf(c.id) < 0; });
+  var cpu = CHARACTERS.filter(function (c) { return used.indexOf(c.id) < 0; }).sort(function () { return Math.random() - 0.5; });
   var grid = [];
   var cpuIdx = 0;
   var humanSlots = humans.length === 1 ? [5] : [4, 5];
@@ -107,7 +124,8 @@ Race.prototype.buildHud = function () {
     el.innerHTML =
       '<div class="hud-lap"><span class="lbl">VOLTA</span> <b>1</b>/' + LAPS + '</div>' +
       '<div class="hud-time"></div>' +
-      '<div class="hud-item"><div class="slot"></div></div>' +
+      '<div class="hud-item"><div class="slot"></div><div class="uses"></div></div>' +
+      '<div class="hud-coins"><i></i><b>0</b></div>' +
       '<div class="hud-pos"><b>1</b><sup>º</sup></div>' +
       '<canvas class="hud-map" width="150" height="150"></canvas>' +
       '<div class="hud-center"></div>' +
@@ -117,6 +135,7 @@ Race.prototype.buildHud = function () {
     var mctx = map.getContext('2d');
     p.hud = {
       el: el, lap: el.querySelector('.hud-lap b'), pos: el.querySelector('.hud-pos b'), item: el.querySelector('.slot'),
+      uses: el.querySelector('.uses'), coins: el.querySelector('.hud-coins b'),
       center: el.querySelector('.hud-center'), time: el.querySelector('.hud-time'), map: map, mctx: mctx
     };
   });
@@ -143,8 +162,11 @@ Race.prototype.updateHud = function () {
     h.lap.textContent = lap;
     h.pos.textContent = k.finished ? k.place : ranks.indexOf(k) + 1;
     h.time.textContent = fmtTime(k.finished ? k.finishTime : Math.max(0, self.time));
-    var icon = k.rolling > 0 ? ITEMS[['nitro', 'oil', 'bomb', 'missile'][Math.floor(self.time * 12) % 4]].icon : (k.item ? ITEMS[k.item].icon : '');
+    var icon = k.rolling > 0 ? ITEMS[ITEM_KEYS[Math.floor(self.time * 12) % ITEM_KEYS.length]].icon : (k.item ? ITEMS[k.item].icon : '');
     if (h.item.textContent !== icon) h.item.textContent = icon;
+    var uses = k.rolling <= 0 && k.item && k.itemUses > 1 ? '×' + k.itemUses : '';
+    if (h.uses.textContent !== uses) h.uses.textContent = uses;
+    if (h.coins.textContent !== String(k.coins)) h.coins.textContent = k.coins;
     var c = h.mctx;
     c.clearRect(0, 0, 150, 150);
     c.drawImage(self.mapBg, 0, 0);
@@ -198,9 +220,12 @@ Race.prototype.rollItem = function (k) {
 
 Race.prototype.useItem = function (k) {
   var item = k.item;
-  k.item = null;
+  k.itemUses--;
+  if (k.itemUses <= 0) k.item = null;
   var t = this.track, fx = Math.sin(k.heading), fz = Math.cos(k.heading);
-  if (item === 'nitro') { k.giveBoost(1.6, 1.5); return; }
+  if (item === 'nitro' || item === 'nitro3') { k.giveBoost(1.4, 1.5); return; }
+  if (item === 'shield') { k.shield = 12; if (k.human) Sound.play('item'); return; }
+  if (item === 'super') { k.superT = 7; k.shield = 0; k.spin = 0; if (k.human) Sound.play('boost'); return; }
   if (k.human) Sound.play('throw');
   if (item === 'oil') {
     var x = k.x - fx * 3, z = k.z - fz * 3, p = t.project(x, z, k.idx);
@@ -272,6 +297,7 @@ Race.prototype.updateHazards = function (dt) {
     for (var i = 0; i < self.karts.length; i++) {
       var k = self.karts[i];
       if (k === h.owner && h.safe > 0) continue;
+      if (k.air && k.y - k.groundY > 2 && h.type !== 'missile') continue;
       var r = h.type === 'oil' ? 2.2 : 1.8;
       if ((k.x - h.x) * (k.x - h.x) + (k.z - h.z) * (k.z - h.z) < r * r) {
         if (k.hit()) {
@@ -313,6 +339,44 @@ Race.prototype.updateBoxes = function (dt) {
   });
 };
 
+Race.prototype.updateCoins = function (dt) {
+  var self = this;
+  this.coins.forEach(function (c) {
+    if (c.respawn > 0) { c.respawn -= dt; if (c.respawn <= 0) c.mesh.visible = true; return; }
+    c.mesh.rotation.y += dt * 3;
+    for (var i = 0; i < self.karts.length; i++) {
+      var k = self.karts[i];
+      if (Math.abs(k.y - c.mesh.position.y) < 3 && (k.x - c.x) * (k.x - c.x) + (k.z - c.z) * (k.z - c.z) < 1.9 * 1.9) {
+        c.mesh.visible = false; c.respawn = 12;
+        k.addCoin();
+        break;
+      }
+    }
+  });
+};
+
+/** Rampas, planador e placas de turbo: detecta quando o kart cruza o ponto. */
+Race.prototype.updateFeatures = function (k, prevS) {
+  var t = this.track, N = t.N;
+  k.groundOffset = 0;
+  for (var i = 0; i < this.features.length; i++) {
+    var f = this.features[i];
+    var back = f.idx - k.lastS;
+    if (back < -N / 2) back += N; else if (back > N / 2) back -= N;
+    var inLane = Math.abs(k.d - f.lat) < f.width / 2 + 0.3;
+    if (f.type !== 'boost' && inLane && back >= 0) {
+      var len = (f.type === 'glider' ? 7 : 6) / t.spacing, h = f.type === 'glider' ? 1.6 : 1.2;
+      if (back < len) k.groundOffset = Math.max(k.groundOffset, h * (1 - back / len));
+    }
+    var before = f.idx - prevS;
+    if (before < -N / 2) before += N; else if (before > N / 2) before -= N;
+    if (before > 0 && back <= 0 && inLane && k.speed > 2) {
+      if (f.type === 'boost') k.giveBoost(1.0, 1.45);
+      else if (k.speed > 8) k.launch(f.type === 'glider');
+    }
+  }
+};
+
 Race.prototype.collideKarts = function () {
   var ks = this.karts, R = PHYS.radius * 2;
   for (var i = 0; i < ks.length; i++) for (var j = i + 1; j < ks.length; j++) {
@@ -323,6 +387,8 @@ Race.prototype.collideKarts = function () {
       a.x -= nx * push; a.z -= nz * push; b.x += nx * push; b.z += nz * push;
       var avg = (a.speed + b.speed) / 2;
       a.speed = a.speed * 0.8 + avg * 0.2; b.speed = b.speed * 0.8 + avg * 0.2;
+      if (a.superT > 0 && b.superT <= 0) b.hit();
+      if (b.superT > 0 && a.superT <= 0) a.hit();
       if ((a.human || b.human) && a.bumpCd <= 0) { Sound.play('bump'); a.bumpCd = 0.3; }
     }
   }
@@ -362,7 +428,9 @@ Race.prototype.step = function (dt) {
     if (p && !k.finished && !autoAll) c = Input.controls(p.device, self.settings.autoAccel);
     else c = k.aiControls(self, dt);
     var lapBefore = Math.floor(k.dist / self.track.N);
+    var prevS = k.lastS;
     k.update(dt, c, self);
+    self.updateFeatures(k, prevS);
     var lapNow = Math.floor(k.dist / self.track.N);
     if (!k.finished && lapNow > lapBefore && lapNow >= 1) {
       if (lapNow >= LAPS) self.finish(k);
@@ -374,6 +442,7 @@ Race.prototype.step = function (dt) {
   });
   this.collideKarts();
   this.updateBoxes(dt);
+  this.updateCoins(dt);
   this.updateHazards(dt);
   this.karts.forEach(function (k) { k.place3d(self.track); });
 

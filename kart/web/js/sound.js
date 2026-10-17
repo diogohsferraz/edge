@@ -55,6 +55,9 @@ var Sound = (function () {
     bump: function () { noise(0.15, 0.25, 500); },
     lap: function () { [659, 784, 988].forEach(function (f, i) { setTimeout(function () { tone(f, 0.12, 'square', 0.14); }, i * 90); }); },
     finish: function () { [523, 659, 784, 1046, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.16, 'square', 0.15); }, i * 120); }); },
+    coin: function () { tone(988, 0.06, 'square', 0.1); setTimeout(function () { tone(1319, 0.12, 'square', 0.1); }, 50); },
+    trick: function () { tone(500, 0.15, 'triangle', 0.15, 1400); },
+    glider: function () { noise(0.6, 0.2, 2500); tone(300, 0.6, 'sine', 0.1, 600); },
     select: function () { tone(700, 0.05, 'square', 0.08); },
     confirm: function () { tone(660, 0.07, 'square', 0.1); setTimeout(function () { tone(990, 0.1, 'square', 0.1); }, 60); },
     back: function () { tone(400, 0.08, 'square', 0.08); }

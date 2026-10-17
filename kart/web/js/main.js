@@ -4,7 +4,7 @@
   var canvas = document.getElementById('game');
   var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, powerPreference: 'high-performance' });
   var settings = loadSettings();
-  var session = { players: [], trackIndex: 0, difficulty: 'normal' };
+  var session = { players: [], trackIndex: 0, difficulty: '100' };
   var race = null;
   var menuScene = null;
 
@@ -39,7 +39,7 @@
     var sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(80, 150, 40); sc.add(sun);
     sc.add(track.group);
     var karts = [0, 1, 2].map(function (i) {
-      var k = new Kart(CHARACTERS[(i * 3) % 8], { diff: DIFFICULTY.normal });
+      var k = new Kart(CHARACTERS[(i * 3) % CHARACTERS.length], { diff: DIFFICULTY['100'] });
       var s = track.sample(i * 40);
       k.x = s.x + s.nx * (i - 1) * 4; k.z = s.z + s.nz * (i - 1) * 4; k.heading = s.h;
       var p = track.project(k.x, k.z); k.idx = p.idx; k.lastS = p.s; k.y = p.y;
@@ -177,7 +177,7 @@
         if (e.action === 'left' && cu.i % cols > 0) cu.i--;
         if (e.action === 'right' && cu.i % cols < cols - 1) cu.i++;
         if (e.action === 'up' && cu.i >= cols) cu.i -= cols;
-        if (e.action === 'down' && cu.i < cols) cu.i += cols;
+        if (e.action === 'down' && cu.i + cols < CHARACTERS.length) cu.i += cols;
         if (['left', 'right', 'up', 'down'].indexOf(e.action) >= 0) Sound.play('select');
         if (e.action === 'ok') {
           var taken = cursors.some(function (o, oi) { return oi !== pi && o.done && o.i === cu.i; });
@@ -209,14 +209,14 @@
       drawTrackOutline(cv.getContext('2d'), sampleTrack(def).samples, 220, 150, 14, 7, '#ffffff');
       card.appendChild(cv);
       card.appendChild(el('div', 'tname', def.name));
-      card.appendChild(el('div', 'muted', { beach: 'Praia', mountain: 'Montanha', city: 'Cidade à noite' }[def.theme]));
+      card.appendChild(el('div', 'muted', { beach: 'Praia', mountain: 'Montanha · planador', city: 'Cidade à noite', desert: 'Deserto · rampas', snow: 'Neve · planador' }[def.theme]));
       row.appendChild(card);
       var it = { el: card, ok: function () { session.trackIndex = i; startRace(); } };
       card.addEventListener('click', it.ok);
       return it;
     });
     s.add(items);
-    var diff = Menu.selector('Dificuldade', [['easy', 'Fácil'], ['normal', 'Normal'], ['hard', 'Difícil']],
+    var diff = Menu.selector('Cilindrada', [['50', '50cc (fácil)'], ['100', '100cc (normal)'], ['150', '150cc (rápido)']],
       function () { return session.difficulty; }, function (v) { session.difficulty = v; });
     var auto = Menu.selector('Aceleração automática', [[false, 'Desligada'], [true, 'Ligada']],
       function () { return settings.autoAccel; }, function (v) { settings.autoAccel = v; saveSettings(); });
@@ -289,8 +289,9 @@
     t.innerHTML =
       '<div><h3>Controle (Bluetooth/USB, inclusive do Switch)</h3><p><b>Analógico / direcional</b>: virar<br><b>A</b> ou <b>ZR</b>: acelerar<br><b>B</b> ou <b>ZL</b>: frear e dar ré<br><b>R</b> ou <b>SR</b>: drift<br><b>X</b>, <b>Y</b>, <b>L</b> ou <b>SL</b>: usar item<br><b>+</b> ou <b>Start</b>: pausar</p></div>' +
       '<div><h3>Controle remoto do projetor</h3><p><b>◀ ▶</b>: virar<br>Acelera sozinho<br><b>▼</b>: frear<br><b>▲</b> (segurar): drift<br><b>OK</b>: usar item<br><b>Voltar</b>: pausar</p></div>' +
-      '<div><h3>Drift com turbo</h3><p>Numa curva, segure o botão de drift virando. As faíscas ficam <b style="color:#3fa9ff">azuis</b> e depois <b style="color:#ff8a2a">laranja</b>. Solte para ganhar turbo.</p></div>' +
-      '<div><h3>Itens</h3><p>⚡ Nitro: turbo<br>🛢️ Óleo: deixa uma mancha atrás<br>💣 Bomba: rola para a frente e quica nas barreiras<br>🚀 Míssil: persegue quem está à sua frente</p></div>' +
+      '<div><h3>Drift com turbo</h3><p>Numa curva, segure o drift virando. As faíscas ficam <b style="color:#3fa9ff">azuis</b>, depois <b style="color:#ff8a2a">laranja</b> e por fim <b style="color:#d25cff">roxas</b>. Solte para ganhar turbo: quanto mais longo o drift, maior o turbo.</p></div>' +
+      '<div><h3>Itens (a roleta depende da sua posição)</h3><p>⚡ Nitro (ou ×3) · 🛢️ Óleo · 💣 Bomba que quica · 🚀 Míssil que persegue quem está à frente · 🛡️ Escudo contra um golpe · 🔥 Supercarga: invencível, mais rápido e derruba quem encostar</p></div>' +
+      '<div><h3>Moedas, rampas e planador</h3><p>Cada moeda aumenta a velocidade máxima (até 10; perde 3 ao ser atingido). Nas rampas, aperte o drift no ar para uma manobra e ganhe turbo ao pousar. A rampa azul abre o planador. Placas laranja dão turbo.</p></div>' +
       '<div><h3>Largada</h3><p>Acelere quando aparecer o <b>1</b> para largar com turbo. Acelerar cedo demais não dá turbo.</p></div>' +
       '<div><h3>Teclado (PC)</h3><p>J1: setas, Espaço (drift), X (item)<br>J2: WASD, Q (drift), E (item)</p></div>';
     s.root.appendChild(t);

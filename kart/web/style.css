@@ -118,3 +118,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e1a; col
 .pad-log { display: flex; flex-direction: column; gap: 4px; min-height: 30vh; width: min(640px, 86vw); font-size: clamp(15px, 2.4vh, 22px); }
 .pad-log div { background: var(--panel-2); border-radius: 8px; padding: 6px 12px; }
 .pad-log div:first-child { border: 2px solid var(--accent); }
+
+.hud-item { position: absolute; }
+.hud-item .uses { position: absolute; right: 4px; bottom: 0; font-weight: 900; font-size: 2.6vh; text-shadow: 0 2px 0 #000; }
+.hud-coins { position: absolute; bottom: 25vh; left: 2.5vw; display: flex; align-items: center; gap: 8px; font-size: clamp(18px, 4vh, 34px); font-weight: 900; text-shadow: 0 3px 0 #000; }
+.hud-view:not(.full) .hud-coins { bottom: 18vh; font-size: clamp(14px, 3vh, 26px); }
+.hud-coins i { display: inline-block; width: 1em; height: 1em; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff3b0, #ffc928 45%, #b88400); box-shadow: 0 2px 0 #000; }
+.char-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.chars .char { padding: 1vh 10px; gap: .4vh; }
+.chars .helmet { width: 6.5vh; height: 6.5vh; }
+.chars .stat i { height: 4px; }

@@ -7,16 +7,23 @@ var CHARACTERS = [
   { id: 'nina', name: 'Nina Faísca', color: 0xeda100, suit: 0xe34948, speed: 0.97, accel: 1.06, handling: 1.04 },
   { id: 'rafa', name: 'Rafa Ventania', color: 0x6250d6, suit: 0x7df9ff, speed: 1.05, accel: 0.92, handling: 0.95 },
   { id: 'duda', name: 'Duda Drift', color: 0xeb6834, suit: 0x222222, speed: 0.99, accel: 1.0, handling: 1.08 },
-  { id: 'gui', name: 'Gui Motor', color: 0x008300, suit: 0xf0f0f0, speed: 1.03, accel: 0.95, handling: 0.98 }
+  { id: 'gui', name: 'Gui Motor', color: 0x008300, suit: 0xf0f0f0, speed: 1.03, accel: 0.95, handling: 0.98 },
+  { id: 'mel', name: 'Mel Cometa', color: 0x7df9ff, suit: 0x2a78d6, speed: 0.95, accel: 1.12, handling: 1.05 },
+  { id: 'beto', name: 'Beto Trovão', color: 0x8b5a2b, suit: 0xffd23f, speed: 1.07, accel: 0.9, handling: 0.93 },
+  { id: 'kaka', name: 'Kaká Foguete', color: 0xff2bd6, suit: 0x111111, speed: 1.01, accel: 1.02, handling: 0.99 },
+  { id: 'iara', name: 'Iara Onda', color: 0x00a3a3, suit: 0xffffff, speed: 0.98, accel: 1.03, handling: 1.07 }
 ];
 
+/* Classes de velocidade (cilindradas). `ai` é o quanto a CPU aproveita do kart. */
 var DIFFICULTY = {
-  easy: { name: 'Fácil', speed: 0.85, ai: 0.84 },
-  normal: { name: 'Normal', speed: 1.0, ai: 0.94 },
-  hard: { name: 'Difícil', speed: 1.15, ai: 1.0 }
+  '50': { name: '50cc', speed: 0.82, ai: 0.84 },
+  '100': { name: '100cc', speed: 1.0, ai: 0.94 },
+  '150': { name: '150cc', speed: 1.18, ai: 1.0 }
 };
 
-var PHYS = { maxSpeed: 28, accel: 15, brake: 32, reverse: 9, coast: 7, turn: 2.0, offroad: 0.5, boost: 1.42, radius: 1.05 };
+var PHYS = { maxSpeed: 28, accel: 15, brake: 32, reverse: 9, coast: 7, turn: 2.0, offroad: 0.5, boost: 1.42, radius: 1.05, gravity: 32 };
+var DRIFT_LEVELS = [{ at: 1.0, time: 0.6, color: 0x3fa9ff }, { at: 2.0, time: 1.1, color: 0xff8a2a }, { at: 3.2, time: 1.7, color: 0xd25cff }];
+var MAX_COINS = 10;
 
 function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -26,7 +33,8 @@ function wrapAngle(a) {
 
 function makeKartMesh(ch) {
   var g = new THREE.Group();
-  var lam = function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
+  var mats = [];
+  var lam = function (c) { var m = new THREE.MeshLambertMaterial({ color: c }); mats.push(m); return m; };
   var body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.45, 2.4), lam(ch.color));
   body.position.y = 0.45;
   g.add(body);
@@ -85,6 +93,18 @@ function makeKartMesh(ch) {
   flame.position.set(0, 0.5, -1.9);
   flame.visible = false;
   g.add(flame);
+  // Asa do planador
+  var glider = new THREE.Group();
+  var sail = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.08, 1.3), new THREE.MeshLambertMaterial({ color: ch.suit === 0x222222 || ch.suit === 0x111111 || ch.suit === 0x333333 ? 0xffd23f : ch.suit }));
+  sail.position.y = 2.7;
+  glider.add(sail);
+  [-0.5, 0.5].forEach(function (x) {
+    var rod = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.0, 0.06), new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    rod.position.set(x, 2.2, 0); glider.add(rod);
+  });
+  glider.position.z = -0.3;
+  glider.visible = false;
+  g.add(glider);
 
   var root = new THREE.Group();
   var shadow = new THREE.Mesh(new THREE.CircleGeometry(1.5, 12), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
@@ -93,7 +113,13 @@ function makeKartMesh(ch) {
   shadow.scale.set(1, 1.5, 1);
   root.add(shadow);
   root.add(g);
-  return { root: root, body: g, wheels: wheels, sparks: sparks, sparkMat: sparkMat, flame: flame };
+  // Bolha do escudo / supercarga (fica fora do corpo para não girar com o drift)
+  var bubbleMat = new THREE.MeshBasicMaterial({ color: 0x7df9ff, transparent: true, opacity: 0.28, depthWrite: false });
+  var bubble = new THREE.Mesh(new THREE.SphereGeometry(2.0, 14, 10), bubbleMat);
+  bubble.position.y = 1.0;
+  bubble.visible = false;
+  root.add(bubble);
+  return { root: root, body: g, wheels: wheels, sparks: sparks, sparkMat: sparkMat, flame: flame, glider: glider, shadow: shadow, bubble: bubble, bubbleMat: bubbleMat };
 }
 
 function Kart(ch, opts) {
@@ -105,50 +131,78 @@ function Kart(ch, opts) {
   this.maxSpeed = PHYS.maxSpeed * opts.diff.speed * ch.speed;
   this.mesh = makeKartMesh(ch);
   this.x = 0; this.z = 0; this.y = 0; this.heading = 0; this.speed = 0;
+  this.groundY = 0; this.groundOffset = 0;
   this.idx = 0; this.lastS = 0; this.dist = 0; this.d = 0;
   this.drifting = false; this.driftDir = 0; this.charge = 0; this.hop = 0;
   this.boost = 0; this.boostPower = PHYS.boost;
   this.spin = 0; this.invuln = 0; this.bumpCd = 0;
-  this.item = null; this.rolling = 0; this.itemHeld = false;
+  this.air = false; this.vy = 0; this.gliding = false; this.trick = false; this.trickT = 0; this.airTime = 0;
+  this.coins = 0; this.shield = 0; this.superT = 0;
+  this.item = null; this.itemUses = 0; this.rolling = 0;
   this.finished = false; this.finishTime = 0; this.place = 0;
   this.prevDrift = false; this.prevItem = false;
   this.ai = { lane: (Math.random() - 0.5) * 1.1, laneTimer: 0, driftTimer: 0, itemDelay: 1 + Math.random() * 2, skill: 1 };
   this.offroad = false;
 }
 
+Kart.prototype.driftLevel = function () {
+  if (!this.drifting) return 0;
+  for (var i = DRIFT_LEVELS.length - 1; i >= 0; i--) if (this.charge >= DRIFT_LEVELS[i].at) return i + 1;
+  return 0;
+};
+
 Kart.prototype.place3d = function (track) {
   var r = this.mesh.root;
   r.position.set(this.x, this.y, this.z);
   r.rotation.y = this.heading;
+  this.mesh.shadow.position.y = Math.min(0, this.groundY - this.y) + 0.08;
+  this.mesh.shadow.visible = this.y - this.groundY < 12;
   var b = this.mesh.body;
   var visualYaw = this.drifting ? this.driftDir * 0.45 : 0;
   if (this.spin > 0) visualYaw += (1.1 - this.spin) * Math.PI * 4;
   b.rotation.y += (visualYaw - b.rotation.y) * (this.spin > 0 ? 1 : 0.2);
-  b.position.y = Math.sin(Math.min(1, this.hop / 0.25) * Math.PI) * 0.5;
+  b.position.y = this.air ? 0 : Math.sin(Math.min(1, Math.max(0, this.hop) / 0.25) * Math.PI) * 0.5;
+  b.rotation.z = this.trickT > 0 ? (1 - this.trickT / 0.45) * Math.PI * 2 * (this.driftDir || 1) : 0;
   // Inclinação acompanhando a rampa
-  var ahead = track.sample(this.idx + 3), behind = track.sample(this.idx - 3);
-  var slope = (ahead.y - behind.y) / (6 * track.spacing);
-  var align = Math.cos(this.heading - ahead.h);
-  b.rotation.x = -Math.atan(slope) * align;
+  if (!this.air) {
+    var ahead = track.sample(this.idx + 3), behind = track.sample(this.idx - 3);
+    var slope = (ahead.y - behind.y) / (6 * track.spacing);
+    b.rotation.x = -Math.atan(slope) * Math.cos(this.heading - ahead.h);
+  } else {
+    b.rotation.x += (Math.max(-0.4, Math.min(0.4, -this.vy * 0.04)) - b.rotation.x) * 0.2;
+  }
   var w = this.mesh.wheels;
   for (var i = 0; i < w.length; i++) w[i].rotation.x += this.speed * 0.03;
-  var lvl = this.drifting ? (this.charge >= 2 ? 2 : this.charge >= 1 ? 1 : 0) : 0;
-  this.mesh.sparks.forEach(function (s) { s.visible = lvl > 0; s.rotation.y += 0.5; s.scale.setScalar(0.7 + Math.random() * 0.6); });
-  this.mesh.sparkMat.color.setHex(lvl === 2 ? 0xff8a2a : 0x3fa9ff);
-  this.mesh.flame.visible = this.boost > 0;
-  if (this.boost > 0) this.mesh.flame.scale.set(1, 0.7 + Math.random() * 0.6, 1);
+  var lvl = this.driftLevel();
+  this.mesh.sparks.forEach(function (s) { s.visible = lvl > 0; s.rotation.y += 0.5; s.scale.setScalar(0.7 + Math.random() * 0.6 + lvl * 0.15); });
+  if (lvl) this.mesh.sparkMat.color.setHex(DRIFT_LEVELS[lvl - 1].color);
+  this.mesh.flame.visible = this.boost > 0 || this.superT > 0;
+  if (this.mesh.flame.visible) this.mesh.flame.scale.set(1, 0.7 + Math.random() * 0.6, 1);
+  this.mesh.glider.visible = this.gliding;
+  var bub = this.mesh.bubble;
+  bub.visible = this.shield > 0 || this.superT > 0;
+  if (this.superT > 0) {
+    this.mesh.bubbleMat.color.setHSL((performance.now() / 300) % 1, 1, 0.55);
+    this.mesh.bubbleMat.opacity = 0.4;
+  } else if (this.shield > 0) {
+    this.mesh.bubbleMat.color.setHex(0x7df9ff);
+    this.mesh.bubbleMat.opacity = this.shield < 2 && Math.floor(performance.now() / 120) % 2 ? 0.1 : 0.28;
+  }
 };
 
 /** Avança a física um passo. `c` são os comandos (do jogador ou da CPU). */
 Kart.prototype.update = function (dt, c, race) {
   var track = race.track;
-  var max = this.maxSpeed;
+  var max = this.maxSpeed * (1 + 0.012 * this.coins);
   var accel = PHYS.accel * this.ch.accel;
   if (this.boost > 0) { this.boost -= dt; max *= this.boostPower; accel *= 3; }
-  if (this.offroad && this.boost <= 0) max *= PHYS.offroad;
+  if (this.superT > 0) { this.superT -= dt; max *= 1.3; accel *= 2; }
+  if (this.shield > 0) this.shield -= dt;
+  if (this.offroad && this.boost <= 0 && this.superT <= 0 && !this.air) max *= PHYS.offroad;
   if (this.invuln > 0) this.invuln -= dt;
   if (this.bumpCd > 0) this.bumpCd -= dt;
   if (this.hop > 0) this.hop -= dt;
+  if (this.trickT > 0) this.trickT -= dt;
 
   if (this.spin > 0) {
     this.spin -= dt;
@@ -157,8 +211,10 @@ Kart.prototype.update = function (dt, c, race) {
     c = { steer: 0, accel: false, brake: false, drift: false, item: false };
   }
 
-  // Aceleração e freio
-  if (c.accel && !c.brake) {
+  // Aceleração e freio (no ar a velocidade se mantém)
+  if (this.air) {
+    if (this.speed > max) this.speed = Math.max(max, this.speed - 10 * dt);
+  } else if (c.accel && !c.brake) {
     if (this.speed < max) this.speed = Math.min(max, this.speed + accel * dt * (this.speed < 0 ? 2 : 1));
     else this.speed = Math.max(max, this.speed - 25 * dt);
   } else if (c.brake) {
@@ -170,28 +226,33 @@ Kart.prototype.update = function (dt, c, race) {
     if (this.speed > max) this.speed = Math.max(max, this.speed - 25 * dt);
   }
 
-  // Drift: aperta o botão virando, segura e solta para ganhar turbo
   var driftPressed = c.drift && !this.prevDrift;
-  if (driftPressed && !this.drifting && Math.abs(c.steer) > 0.3 && this.speed > 12 && this.spin <= 0) {
+  // Manobra no ar: apertar o drift logo depois de sair da rampa
+  if (this.air && driftPressed && !this.trick && this.airTime < 0.5 && !this.gliding) {
+    this.trick = true; this.trickT = 0.45;
+    if (this.human) Sound.play('trick');
+  }
+  // Drift: aperta o botão virando, segura e solta para ganhar turbo
+  if (driftPressed && !this.air && !this.drifting && Math.abs(c.steer) > 0.3 && this.speed > 12 && this.spin <= 0) {
     this.drifting = true; this.driftDir = Math.sign(c.steer); this.charge = 0; this.hop = 0.25;
   }
   if (this.drifting && (!c.drift || this.speed < 9)) {
-    if (this.charge >= 2) this.giveBoost(1.25, PHYS.boost);
-    else if (this.charge >= 1) this.giveBoost(0.6, PHYS.boost);
+    var lvl = this.driftLevel();
+    if (lvl) this.giveBoost(DRIFT_LEVELS[lvl - 1].time, PHYS.boost);
     this.drifting = false;
   }
   this.prevDrift = c.drift;
 
   // Direção
   var speedFactor = Math.min(1, Math.abs(this.speed) / 8) * (1 - 0.22 * Math.min(1, Math.abs(this.speed) / PHYS.maxSpeed));
-  var turn = PHYS.turn * this.ch.handling * speedFactor;
+  var turn = PHYS.turn * this.ch.handling * speedFactor * (this.air && !this.gliding ? 0.5 : 1);
   var steer;
   if (this.drifting) {
-    var tight = c.steer * this.driftDir; // -1..1
+    var tight = c.steer * this.driftDir;
     steer = this.driftDir * (0.7 + 0.5 * tight);
-    var before = this.charge;
-    this.charge += dt * (0.7 + 0.6 * Math.max(0, tight));
-    if (this.human && Math.floor(before) !== Math.floor(this.charge) && this.charge < 3) Sound.play('spark');
+    var before = this.driftLevel();
+    if (!this.air) this.charge += dt * (0.7 + 0.6 * Math.max(0, tight));
+    if (this.human && this.driftLevel() > before) Sound.play('spark');
     this.speed *= 1 - 0.04 * dt;
   } else {
     steer = c.steer;
@@ -215,13 +276,21 @@ Kart.prototype.update = function (dt, c, race) {
       this.speed *= 0.55; this.bumpCd = 0.4;
       if (this.human) Sound.play('bump');
     }
-    // Endireita levemente na direção da pista
     var along = Math.atan2(p.tx, p.tz);
     if (this.speed < 0) along += Math.PI;
     this.heading += wrapAngle(along - this.heading) * 0.15;
     this.drifting = false;
   }
-  this.y += (p.y - this.y) * Math.min(1, dt * 15);
+  this.groundY = p.y + this.groundOffset;
+  if (this.air) {
+    this.airTime += dt;
+    this.vy -= (this.gliding && this.vy < 0 ? 0 : PHYS.gravity) * dt;
+    if (this.gliding && this.vy < 0) this.vy = -(3 + 0.3 * Math.max(0, this.y - this.groundY));
+    this.y += this.vy * dt;
+    if (this.y <= this.groundY && this.vy <= 0) this.land();
+  } else {
+    this.y += (this.groundY - this.y) * Math.min(1, dt * 15);
+  }
 
   // Progresso contínuo (voltas)
   var N = track.N, ds = p.s - this.lastS;
@@ -233,25 +302,51 @@ Kart.prototype.update = function (dt, c, race) {
   if (this.rolling > 0) {
     this.rolling -= dt;
     if (this.human && Math.random() < 0.3) Sound.play('roll');
-    if (this.rolling <= 0) this.item = this.pendingItem;
+    if (this.rolling <= 0) { this.item = this.pendingItem; this.itemUses = this.item === 'nitro3' ? 3 : 1; }
   }
   var itemPressed = c.item && !this.prevItem;
   this.prevItem = c.item;
   if (itemPressed && this.item && this.spin <= 0) race.useItem(this);
 };
 
+/** Sai do chão: rampa comum (pulo) ou rampa de planador. */
+Kart.prototype.launch = function (glider) {
+  if (this.air) return;
+  this.air = true; this.airTime = 0; this.trick = false;
+  this.gliding = !!glider;
+  this.vy = glider ? 13 : 8 + Math.max(0, this.speed) * 0.08;
+  this.y = Math.max(this.y, this.groundY);
+  if (glider && this.human) Sound.play('glider');
+};
+
+Kart.prototype.land = function () {
+  this.air = false; this.vy = 0; this.y = this.groundY;
+  this.gliding = false;
+  if (this.trick) { this.giveBoost(0.8, PHYS.boost); this.trick = false; }
+  if (this.human) Sound.play('bump');
+};
+
 Kart.prototype.giveBoost = function (t, power) {
   this.boost = Math.max(this.boost, t);
-  this.boostPower = power || PHYS.boost;
+  this.boostPower = Math.max(power || PHYS.boost, this.boost > t ? this.boostPower : 0);
   if (this.human) Sound.play('boost');
 };
 
+Kart.prototype.addCoin = function () {
+  if (this.coins < MAX_COINS) this.coins++;
+  this.giveBoost(0.15, 1.15);
+  if (this.human) Sound.play('coin');
+};
+
+/** Atingido por item ou kart com supercarga. Retorna true se rodou. */
 Kart.prototype.hit = function () {
-  if (this.invuln > 0 || this.spin > 0) return false;
+  if (this.superT > 0 || this.invuln > 0 || this.spin > 0) return false;
+  if (this.shield > 0) { this.shield = 0; this.invuln = 0.5; if (this.human) Sound.play('bump'); return false; }
   this.spin = 1.1;
   this.invuln = 2.0;
   this.boost = 0;
   this.drifting = false;
+  this.coins = Math.max(0, this.coins - 3);
   if (this.human) Sound.play('hit');
   return true;
 };
@@ -263,7 +358,6 @@ Kart.prototype.aiControls = function (race, dt) {
   ai.laneTimer -= dt;
   if (ai.laneTimer <= 0) { ai.lane = (Math.random() - 0.5) * 1.2; ai.laneTimer = 2 + Math.random() * 3; }
 
-  // Desvia de karts logo à frente
   var lane = ai.lane;
   for (var i = 0; i < race.karts.length; i++) {
     var o = race.karts[i];
@@ -271,7 +365,6 @@ Kart.prototype.aiControls = function (race, dt) {
     var ahead = o.dist - this.dist;
     if (ahead > 0 && ahead < 8 && Math.abs(o.d - this.d) < 2.5) lane = o.d > this.d ? lane - 0.6 : lane + 0.6;
   }
-  // Desvia de óleo no caminho
   race.hazards.forEach(function (hz) {
     if (hz.type !== 'oil') return;
     var dd = hz.dist - this.dist;
@@ -286,7 +379,6 @@ Kart.prototype.aiControls = function (race, dt) {
   var diff = wrapAngle(want - this.heading);
   c.steer = Math.max(-1, Math.min(1, diff * 2.4));
 
-  // Velocidade alvo conforme a curva à frente
   var s1 = t.sample(this.idx + Math.round(6 / t.spacing)), s2 = t.sample(this.idx + Math.round(30 / t.spacing));
   var sharp = Math.abs(wrapAngle(s2.h - s1.h));
   var rubber = 1;
@@ -296,18 +388,22 @@ Kart.prototype.aiControls = function (race, dt) {
     if (gap > t.N * 0.12) rubber = 0.9;
     else if (gap < -t.N * 0.08) rubber = 1.09;
   }
-  var target = this.maxSpeed * ai.skill * rubber * (1 - Math.min(0.4, Math.max(0, sharp - 0.35) * 0.45));
+  var target = this.maxSpeed * (1 + 0.012 * this.coins) * ai.skill * rubber * (1 - Math.min(0.4, Math.max(0, sharp - 0.35) * 0.45));
+  if (this.boost > 0 || this.superT > 0) target *= 1.4;
   if (this.speed > target + 3) { c.accel = false; c.brake = this.speed > target + 7; }
   else c.accel = this.speed < target;
+
+  // Manobra no ar
+  if (this.air && !this.trick && !this.gliding && this.airTime > 0.05 && Math.random() < 0.15 * ai.skill) { c.drift = true; return c; }
 
   // Drift em curvas longas
   if (ai.driftTimer > 0) {
     ai.driftTimer -= dt;
     c.drift = true;
     if (!this.drifting && ai.driftTimer < ai.driftLen - 0.1) ai.driftTimer = 0;
-  } else if (sharp > 0.7 && this.speed > 15 && Math.abs(diff) > 0.12 && Math.random() < 0.02 * ai.skill) {
-    ai.driftLen = ai.driftTimer = 1.2 + Math.random() * 1.2;
-    c.drift = false; // borda de subida no próximo passo
+  } else if (!this.air && sharp > 0.7 && this.speed > 15 && Math.abs(diff) > 0.12 && Math.random() < 0.02 * ai.skill) {
+    ai.driftLen = ai.driftTimer = 1.2 + Math.random() * 2.2;
+    c.drift = false;
   }
 
   // Itens
@@ -315,11 +411,13 @@ Kart.prototype.aiControls = function (race, dt) {
     ai.itemDelay -= dt;
     if (ai.itemDelay <= 0) {
       var use = false;
-      if (this.item === 'nitro') use = sharp < 0.4;
+      if (this.item === 'nitro' || this.item === 'nitro3') use = sharp < 0.4;
       else if (this.item === 'oil') use = race.someoneBehind(this, 30);
       else if (this.item === 'bomb') use = race.someoneAhead(this, 45, 4);
       else if (this.item === 'missile') use = race.rankOf(this) > 1;
-      if (use || ai.itemDelay < -8) { c.item = true; ai.itemDelay = 1 + Math.random() * 3; }
+      else if (this.item === 'shield') use = race.someoneBehind(this, 25) || ai.itemDelay < -3;
+      else if (this.item === 'super') use = true;
+      if (use || ai.itemDelay < -8) { c.item = true; ai.itemDelay = this.item === 'nitro3' ? 0.8 : 1 + Math.random() * 3; }
     }
   }
   return c;
