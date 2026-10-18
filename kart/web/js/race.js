@@ -404,7 +404,7 @@ Race.prototype.step = function (dt) {
     if (n !== this.lastCount && n > 0) { this.lastCount = n; this.flash(null, String(n), 'count'); Sound.play('count'); }
     // Turbo de largada: acelerar entre o "2" e o "1"... e soltar no "JÁ"
     this.players.forEach(function (p) {
-      var c = Input.controls(p.device, self.settings.autoAccel);
+      var c = Input.controls(p.device, self.settings.autoAccel, self.players.length === 1);
       if (self.countdown < 1.6 && self.countdown > 0.2 && c.accel) p.startCharge = (p.startCharge || 0) + dt;
       else if (self.countdown >= 1.6 && c.accel) p.startCharge = -99;
     });
@@ -425,7 +425,7 @@ Race.prototype.step = function (dt) {
   this.karts.forEach(function (k) {
     var c;
     var p = self.playerOf(k);
-    if (p && !k.finished && !autoAll) c = Input.controls(p.device, self.settings.autoAccel);
+    if (p && !k.finished && !autoAll) c = Input.controls(p.device, self.settings.autoAccel, self.players.length === 1);
     else c = k.aiControls(self, dt);
     var lapBefore = Math.floor(k.dist / self.track.N);
     var prevS = k.lastS;

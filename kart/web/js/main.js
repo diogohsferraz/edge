@@ -245,11 +245,36 @@
         if (v === 'tilt') Touch.requestTilt().then(function (ok) { if (!ok) { settings.steer = 'buttons'; saveSettings(); options(); } });
       }),
       Menu.selector('Joy-Con', [['pair', 'Juntos (1 jogador)'], ['single', 'Separados, deitados (1 por jogador)']], function () { return settings.joycon; }, function (v) { settings.joycon = v; saveSettings(); }),
+      Menu.button('Juntar 2 controles (par de Joy-Con)', pairPads),
       Menu.button('Testar controle', testPad),
       Menu.button('Voltar', title)
     ];
     list.forEach(function (it) { col.appendChild(it.el); s.add([it]); });
     s.root.appendChild(el('p', 'muted', 'Se o jogo travar no projetor, use a qualidade Baixa. Com Joy-Con ou Pro Controller do Switch, ligue "Botões estilo Nintendo".'));
+    Menu.show(s);
+  }
+
+  /** Junta dois controles num só: aperte um botão em cada um. */
+  function pairPads() {
+    var first = null, done = false;
+    var s = new Menu.Screen({ cls: 'dialog', handle: function (e) { if (done || first) return true; if (e.action === 'back' && e.device.indexOf('kb') === 0) { stop(); options(); } return true; } });
+    s.root.appendChild(el('h2', '', 'Juntar 2 controles'));
+    var msg = el('p', 'big', 'Aperte qualquer botão no Joy-Con esquerdo');
+    s.root.appendChild(msg);
+    s.root.appendChild(el('p', 'muted', 'Depois aperte um botão no Joy-Con direito. Os dois passam a funcionar como um controle só.'));
+    var cancel = Menu.button('Cancelar', function () { stop(); options(); });
+    s.root.appendChild(cancel.el); s.add([cancel]);
+    var off = Input.onRaw(function (r) {
+      if (!r.down || done || r.device.charAt(0) !== 'a') return;
+      if (!first) { first = r.device; msg.textContent = 'Agora aperte um botão no Joy-Con direito'; Sound.play('select'); return; }
+      if (r.device === first) return;
+      done = true;
+      Input.link(first, r.device);
+      Sound.play('confirm');
+      msg.textContent = 'Pronto! Os dois controles agora são um só.';
+      setTimeout(function () { stop(); options(); }, 1500);
+    });
+    function stop() { off(); }
     Menu.show(s);
   }
 
@@ -282,7 +307,11 @@
     s.root.insertBefore(joy, axes);
     timer = setInterval(function () {
       var jc = Input.joyCons();
-      joy.textContent = jc.length ? 'Joy-Cons: ' + jc.map(function (j) { return (j.side === 'L' ? 'esquerdo' : 'direito') + ' [' + j.id + ']' + (j.partner ? ' em par com [' + j.partner + ']' : ''); }).join(' · ') : '';
+      joy.textContent = Input.devices().filter(function (id) { return id.charAt(0) === 'a'; }).map(function (id) {
+        var i = Input.info(id) || {};
+        return '[' + id + '] ' + (i.name || 'sem nome') + (i.side ? ' — Joy-Con ' + (i.side === 'L' ? 'esquerdo' : 'direito') : '') +
+          (jc.filter(function (j) { return j.id === id && j.partner; }).length ? ' (em par)' : '');
+      }).join('\n');
       axes.textContent = Input.devices().filter(function (id) { var a = Input.axes(id); return a && 'x' in a; }).map(function (id) {
         var a = Input.axes(id), f = function (v) { return (v || 0).toFixed(1); };
         return id + ': analógico ' + f(a.x) + ', ' + f(a.y) + ' · direcional ' + f(a.hx) + ', ' + f(a.hy) + ' · gatilhos ' + f(a.lt) + ', ' + f(a.rt);

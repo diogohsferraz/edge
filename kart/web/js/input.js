@@ -34,16 +34,20 @@ var Input = (function () {
   };
   function joySide(name, vendor, product) {
     var n = String(name || '').toLowerCase();
-    if (product === 0x2006 || /joy-?con.*\(l\)|left joy-?con|joy-?con l\b/.test(n)) return 'L';
-    if (product === 0x2007 || /joy-?con.*\(r\)|right joy-?con|joy-?con r\b/.test(n)) return 'R';
+    var joy = /joy.?con/.test(n);
+    if (product === 0x2006 || (joy && /\(l\)|\bleft\b|\bl\b|esquerd/.test(n))) return 'L';
+    if (product === 0x2007 || (joy && /\(r\)|\bright\b|\br\b|direit/.test(n))) return 'R';
     return null;
   }
+  var manual = {}; // pares feitos à mão em Opções → Juntar 2 controles
   function relink() {
     links = {};
+    for (var m in manual) links[m] = manual[m];
     if (joyMode !== 'pair') return;
     var Ls = [], Rs = [];
     Object.keys(devices).sort(function (a, b) { return devices[a].seen - devices[b].seen; }).forEach(function (id) {
       var d = devices[id];
+      if (links[id]) return;
       if (d.side === 'L') Ls.push(id); else if (d.side === 'R') Rs.push(id);
     });
     for (var i = 0; i < Math.min(Ls.length, Rs.length); i++) { links[Ls[i]] = Rs[i]; links[Rs[i]] = Ls[i]; }
@@ -52,7 +56,9 @@ var Input = (function () {
   function canonical(id) {
     var p = links[id];
     if (!p) return id;
-    return devices[id].side === 'L' ? id : p;
+    if (devices[id].side === 'L') return id;
+    if (devices[p] && devices[p].side === 'L') return p;
+    return id < p ? id : p;
   }
   var seenCounter = 0;
   function raw(id, label, down) {
@@ -213,28 +219,24 @@ var Input = (function () {
   /* ---------- Comandos de pilotagem ---------- */
   function dz(v) { return Math.abs(v) < 0.2 ? 0 : (v - Math.sign(v) * 0.2) / 0.8; }
 
-  function controls(id, autoAccel) {
+  /**
+   * Comandos de um jogador. Com `mergeAll` (corrida de 1 jogador), todos os controles
+   * conectados pilotam o mesmo kart, então o analógico de um Joy-Con e os botões do outro
+   * funcionam juntos mesmo que o par não tenha sido reconhecido.
+   */
+  function controls(id, autoAccel, mergeAll) {
     var c = { steer: 0, accel: false, brake: false, drift: false, item: false };
     var d = devices[id];
     if (!d) return c;
-    // Toques rápidos (apertou e soltou entre dois passos) contam como pressionados.
-    var k = {}, a = d.axes || {};
-    for (var key in d.keys) k[key] = d.keys[key];
-    for (key in d.taps) k[key] = true;
-    d.taps = {};
-    // Par de Joy-Con: junta botões e usa o analógico que estiver mais inclinado.
-    var partner = links[id] && devices[links[id]];
-    if (partner) {
-      for (key in partner.keys) if (partner.keys[key]) k[key] = true;
-      for (key in partner.taps) k[key] = true;
-      partner.taps = {};
-      var pa = partner.axes || {};
-      a = {
-        x: Math.abs(pa.x || 0) > Math.abs(a.x || 0) ? pa.x : a.x, y: a.y,
-        hx: Math.abs(pa.hx || 0) > Math.abs(a.hx || 0) ? pa.hx : a.hx, hy: a.hy,
-        lt: Math.max(a.lt || 0, pa.lt || 0), rt: Math.max(a.rt || 0, pa.rt || 0)
-      };
+    if (mergeAll && d.kind === 'gamepad') {
+      var extra = Object.keys(devices).filter(function (o) { return o !== id && devices[o].kind === 'gamepad' && o.charAt(0) === 'a'; });
+      if (extra.length) return mergedControls(id, extra, autoAccel);
     }
+    // Toques rápidos (apertou e soltou entre dois passos) contam como pressionados.
+    // Num par de Joy-Con, junta botões e usa o analógico que estiver mais inclinado.
+    var partner = links[id] && devices[links[id]];
+    var mixed = mix(partner ? [d, partner] : [d]);
+    var k = mixed.k, a = partner ? mixed.a : (d.axes || {});
     if (id === 'touch') {
       // Controles na tela do celular (ver touch.js). Acelera sozinho.
       c.steer = d.tilt !== undefined && d.tilt !== null ? d.tilt : (k.right ? 1 : 0) - (k.left ? 1 : 0);
@@ -276,6 +278,30 @@ var Input = (function () {
     return c;
   }
 
+  /** Junta teclas (e toques rápidos) e analógicos de vários dispositivos. */
+  function mix(list) {
+    var k = {}, a = { x: 0, y: 0, hx: 0, hy: 0, lt: 0, rt: 0 };
+    list.forEach(function (d) {
+      var key;
+      for (key in d.keys) if (d.keys[key]) k[key] = true;
+      for (key in d.taps) k[key] = true;
+      d.taps = {};
+      var da = d.axes || {};
+      ['x', 'y', 'hx', 'hy'].forEach(function (ax) { if (Math.abs(da[ax] || 0) > Math.abs(a[ax])) a[ax] = da[ax]; });
+      a.lt = Math.max(a.lt, da.lt || 0); a.rt = Math.max(a.rt, da.rt || 0);
+    });
+    return { k: k, a: a };
+  }
+  function mergedControls(id, extra, autoAccel) {
+    var list = [devices[id]].concat(extra.map(function (o) { return devices[o]; }));
+    var m = mix(list);
+    var tmp = '__mix';
+    devices[tmp] = { id: tmp, kind: 'gamepad', keys: m.k, taps: {}, axes: m.a, menuAxis: { x: 0, y: 0 } };
+    var c = controls(tmp, autoAccel, false);
+    delete devices[tmp];
+    return c;
+  }
+
   function describe(id) {
     if (id === 'kb1') return 'Teclado (setas)';
     if (id === 'kb2') return 'Teclado (WASD)';
@@ -298,6 +324,10 @@ var Input = (function () {
       });
     },
     canonical: canonical,
+    /** Junta dois controles à mão (ex.: Joy-Con que o Android não identificou). */
+    link: function (a, b) { manual[a] = b; manual[b] = a; relink(); },
+    unlinkAll: function () { manual = {}; relink(); },
+    info: function (id) { var d = devices[id]; return d ? { name: d.name, vendor: d.vendor, product: d.product, side: d.side, kind: d.kind } : null; },
     axes: function (id) { var d = devices[id]; return d ? d.axes : null; },
     devices: function () { return Object.keys(devices); },
     clearTaps: function () { for (var id in devices) devices[id].taps = {}; },

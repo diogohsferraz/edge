@@ -158,7 +158,7 @@ Kart.prototype.place3d = function (track) {
   this.mesh.shadow.position.y = Math.min(0, this.groundY - this.y) + 0.08;
   this.mesh.shadow.visible = this.y - this.groundY < 12;
   var b = this.mesh.body;
-  var visualYaw = this.drifting ? this.driftDir * 0.45 : 0;
+  var visualYaw = this.drifting ? -this.driftDir * 0.45 : 0;
   if (this.spin > 0) visualYaw += (1.1 - this.spin) * Math.PI * 4;
   b.rotation.y += (visualYaw - b.rotation.y) * (this.spin > 0 ? 1 : 0.2);
   b.position.y = this.air ? 0 : Math.sin(Math.min(1, Math.max(0, this.hop) / 0.25) * Math.PI) * 0.5;
@@ -257,7 +257,8 @@ Kart.prototype.update = function (dt, c, race) {
   } else {
     steer = c.steer;
   }
-  this.heading += steer * turn * dt * (this.speed < 0 ? -1 : 1);
+  // `steer` positivo = direita na tela. A câmera olha para +z, então a direita da tela é -x.
+  this.heading -= steer * turn * dt * (this.speed < 0 ? -1 : 1);
 
   // Movimento
   var fx = Math.sin(this.heading), fz = Math.cos(this.heading);
@@ -377,7 +378,7 @@ Kart.prototype.aiControls = function (race, dt) {
   var tx = s.x + s.nx * lane * t.half, tz = s.z + s.nz * lane * t.half;
   var want = Math.atan2(tx - this.x, tz - this.z);
   var diff = wrapAngle(want - this.heading);
-  c.steer = Math.max(-1, Math.min(1, diff * 2.4));
+  c.steer = Math.max(-1, Math.min(1, -diff * 2.4));
 
   var s1 = t.sample(this.idx + Math.round(6 / t.spacing)), s2 = t.sample(this.idx + Math.round(30 / t.spacing));
   var sharp = Math.abs(wrapAngle(s2.h - s1.h));

@@ -89,6 +89,10 @@ Um app nativo para a App Store exigiria um Mac com Xcode e uma conta de desenvol
 
 Pro Controller e controles conjugados no grip com cabo funcionam como um controle comum.
 
+Se o Android não identificar qual Joy-Con é o esquerdo e qual é o direito, use
+**Opções → Juntar 2 controles**: aperte um botão no esquerdo e depois no direito. Em corridas de
+**1 jogador**, todos os controles conectados pilotam o mesmo kart, então o par funciona mesmo sem isso.
+
 O suporte do Android aos controles da Nintendo depende da versão do sistema. No Android 12
 ou mais novo, Joy-Con e Pro Controller funcionam bem. Em versões mais antigas, o Pro Controller
 costuma funcionar, mas um Joy-Con sozinho pode parear com o analógico "deitado" (virar
